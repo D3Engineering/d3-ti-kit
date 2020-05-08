@@ -1,0 +1,9 @@
+#pragma once
+
+#include <common/error.h>
+#include <common/config.h>
+#include <gui/gui.h>
+#include <capdisplay/abstractcapturedisplay.h>
+#include <controller/controller.h>
+
+class Autonomous

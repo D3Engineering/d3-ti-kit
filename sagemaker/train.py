@@ -52,8 +52,7 @@ def TrainAndEval(cfg):
     mv2.CompileModel(model, config=cfg)
     callbacks = mv2.CreateCallbacks(config=cfg)
 
-    # steps_per_epoch = info['train-datagen-len'] // cfg['training']['batch-size']
-    steps_per_epoch = 1
+    steps_per_epoch = info['train-datagen-len'] // cfg['training']['batch-size']
 
     # code.interact(local=dict(globals(), **locals()))
     # exit(1)
@@ -74,28 +73,16 @@ def TrainAndEval(cfg):
 
     print("{}: {}, {}: {}".format(model.metrics_names[0], metrics[0], model.metrics_names[1], metrics[1]))
 
+    
     # Save model and history
     if cfg['local']:
         mv2.SaveModel(model, config=cfg)
         SaveHist(history, config=cfg)
         mv2.SaveFrozenGraphV1(model, config=cfg['load/save'])
     else:
-        # strip_model = mv2.CreateEvalModel(cfg)
-        # mv2.TransferWeights(model, strip_model)
-        # mv2.SaveForSagemaker(model, config=cfg['load/save'])
+        import txmodel
+        model = txmodel.processModel(model, cfg, make_eval=True, batch_size=4)
         mv2.SaveFrozenGraphV1(model, config=cfg['load/save'])
-
-    np.random.seed(0)
-    X_sanity = np.array([np.zeros((224,224,3)),
-        np.ones((224,224,3)),
-        np.random.random((224,224,3))])
-    y_sanity_model = model.predict(X_sanity)
-    # y_sanity_strip = strip_model.predict(X_sanity)
-
-    print("Original Model:")
-    print(y_sanity_model)
-    # print("Eval: Model")
-    # print(y_sanity_strip)
 
     
 def _parse_args():
@@ -113,7 +100,6 @@ def _parse_args():
 
 
     return parser.parse_args()
-
 
 
 

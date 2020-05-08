@@ -1,0 +1,98 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <map>
+
+using namespace std;
+
+
+struct ModelConfig
+{
+    enum ModelType
+    {
+        FAKE,
+        REAL
+    } model_type;
+
+    enum InputFormat {
+        ZERO_TO_ONE,
+        ZERO_TO_255,
+        NEG_ONE_TO_ONE,
+    } input_format;
+
+    string name;
+    string path;
+
+    vector<string> labelMap;
+    
+    int batch_size;
+    int infer_width;
+    int infer_height;
+    int crop_x;
+    int crop_y;
+    int num_ch;
+    string _input_name;
+
+    size_t classes;
+};
+
+struct CaptureConfig
+{
+    string device;
+    int capture_width;
+    int capture_height;
+    int disp_width;
+    int disp_height;
+    int crop_x;
+    int crop_y;
+    int zoom;
+    int focus;
+};
+
+struct TableConfig
+{
+    int ticks_per_rotation;
+    int steps;
+    
+};
+
+struct GuiConfig
+{
+    enum Ctrls {
+        TABLE_CORSE_FORWARD,
+        TABLE_CORSE_BACKWARD,
+        TABLE_FINE_FORWARD,
+        TABLE_FINE_BACKWARD,
+
+        MODEL_RUN_INFER,
+        MODEL_ARM,
+        MODEL_EVE,
+
+        DEMO_TOGGLE
+    };
+
+    map<enum Ctrls, string> ui_key_map;
+    float font_size;
+
+    void useDefaults()
+    {
+        this->ui_key_map[TABLE_CORSE_FORWARD] = "n";
+        this->ui_key_map[TABLE_CORSE_BACKWARD] = "p";
+        this->ui_key_map[TABLE_FINE_FORWARD] = "N";
+        this->ui_key_map[TABLE_FINE_BACKWARD] = "P";
+        this->ui_key_map[MODEL_RUN_INFER] = "i";
+        this->ui_key_map[MODEL_ARM] = "a";
+        this->ui_key_map[MODEL_EVE] = "e";
+        this->ui_key_map[DEMO_TOGGLE] = "d";
+    }
+    
+};
+
+struct AppConfig
+{
+    ModelConfig model_config;
+    CaptureConfig cap_config;
+    TableConfig table_config;
+    GuiConfig gui_config;
+};

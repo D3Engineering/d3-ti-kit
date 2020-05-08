@@ -38,6 +38,17 @@ def addBN(x, name, axis=-1):
     fused=True,
     name=name)(x)
 
+  # return layers.BatchNormalization(axis=axis, fused=True, trainable=False, name=name)(x)
+
+  # epsilon = 1e-3
+
+  # batch_mean, batch_var = tf.nn.moments(x,[0])
+  # scale = tf.Variable(tf.ones([32]))
+  # beta = tf.Variable(tf.zeros([32]))
+  # BN = tf.nn.batch_normalization(x, batch_mean, batch_var, beta, scale, epsilon, name=name)
+
+  return BN
+
 
 def addReLU6(x, name):
   return layers.ReLU(6., name=name)(x)
@@ -53,6 +64,7 @@ def InvertedResidual(x,
   block_id=None,config=None):
 
   isEval = config['model']['eval']
+  useBias = isEval
   config = config['model']['regularize']['inv-layers']
 
   inputs = x
@@ -73,13 +85,14 @@ def InvertedResidual(x,
       exp_channels,
       (1,1),
       padding='same',
-      use_bias=False,
+      use_bias=useBias,
       activation=None,
       name=prefix + 'expanded',
       activity_regularizer=expanded_conv_reg)(x)
-
+    
     if not isEval:
       x = addBN(x, prefix + 'expand_BN')
+
     x = addReLU6(x, prefix + 'expand_relu')
 
     if (not isEval) and (not config['expand']['dropout'] is None):
@@ -102,7 +115,7 @@ def InvertedResidual(x,
 
   x = layers.DepthwiseConv2D(
     (3,3),
-    use_bias=False,
+    use_bias=useBias,
     activation=None,
     strides=strides,
     padding='same' if stride==1 else 'valid',
@@ -129,7 +142,7 @@ def InvertedResidual(x,
     filters,
     (1,1),
     padding='same',
-    use_bias=False,
+    use_bias=useBias,
     activation=None,
     name=prefix + 'project',
     activity_regularizer=project_conv_reg)(x)

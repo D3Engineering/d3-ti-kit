@@ -35,6 +35,7 @@ def CreateModel(config):
   config_reg = config['model']['regularize']
   config_model = config['model']
   isEval = config_model['eval']
+  useBias = isEval
 
   # initial convolution
 
@@ -42,15 +43,21 @@ def CreateModel(config):
   #       8 would suggest 2^3 or 3 reductions
   first_conv_filters = mnet.makeDivisible(32*config_model['alpha'], 8)
 
-  inputs = None
-  if isEval:
-    inputs = layers.Input(shape=config_model['image-shape'], batch_size=config['model']['eval-batch-size'], name='input_1')
+  image_shape = config_model['image-shape']
+
+  if config_model['nchw']:
+    image_shape = (image_shape[2], image_shape[0], image_shape[1])
+
+  inputs = layers.Input(shape=image_shape, name='input_1')
+
+  if config_model['nchw']:
+    x = layers.Permute((2,3,1))(inputs)
   else:
-    inputs = layers.Input(shape=config_model['image-shape'], name='input_1')
+    x = inputs
 
   x = layers.ZeroPadding2D(
     padding=mnet.correctPad(config_model['image-shape'][0], 3, 2),
-    name='Conv1_pad')(inputs)
+    name='Conv1_pad')(x)
 
   in_conv_reg = None
   if config_reg['in-conv']['reg']:
@@ -61,7 +68,7 @@ def CreateModel(config):
     (3,3),
     strides=(2,2),
     padding='valid',
-    use_bias=False,
+    use_bias=useBias,
     name='Conv1',
     activity_regularizer=in_conv_reg)(x)
 
@@ -112,11 +119,13 @@ def CreateModel(config):
   out_conv_reg = None
   if config_reg['out-conv']['reg']:
       out_conv_reg = l2(config_reg['out-conv']['reg'])
-      
+
+
+  print("useBias: ", useBias)
   x = layers.Conv2D(
     1280,
     (1,1),
-    use_bias=False,
+    use_bias=useBias,
     name='ConvLast',
     activity_regularizer=out_conv_reg)(x)
 
@@ -128,10 +137,12 @@ def CreateModel(config):
     x = mnet.addDropout(x, 'ConvLast_dropout', rate=config_reg['out-conv']['dropout'])
 
   # pool
-  x = layers.GlobalAveragePooling2D(name='global_avg_pool')(x)
+  # replace this with maxpool
+  x = layers.GlobalMaxPooling2D(name='global_max_pool')(x)
 
   # create model
   model_base = keras.Model(inputs=inputs, outputs=x, name="mobilenetv2")
+
   model_base_out = x
 
   # load and apply weights from imagenet training
@@ -159,7 +170,20 @@ def CreateModel(config):
   return model
 
 
-def CreateEvalModel(config):
+def txWeights(model_from, model_to):
+  # code.interact(local=dict(globals(), **locals()))
+  # exit(1)
+
+  for layer in model_from.layers:
+    try:
+      layer_to = model_to.get_layer(layer.name)
+      layer_to.set_weights(layer.get_weights())
+    except:
+      pass
+      
+
+
+def CreateEvalModel(config=None):
   config['model']['eval'] = True
   config['training']['transfer-learn'] = False
   return CreateModel(config)
@@ -223,7 +247,7 @@ def CreateCallbacks(config=None):
   save_dir = config['load/save']['dir']
 
   if config_train['checkpoint']:
-    ckpt_path = os.path.join(save_dir, "{val_acc:.2f}.ckpt")
+    ckpt_path = os.path.join(save_dir, "{epoch}-{val_acc:.2f}.ckpt")
     cbacks.append(ModelCheckpoint(ckpt_path, save_best_only=True))
 
   if config_train['early-stop']:
@@ -239,6 +263,7 @@ def CreateCallbacks(config=None):
 def FromFile(path):
     return keras.models.load_model(path)
 
+  
 def SaveModel(model, config=None):
     save_dir = os.path.join(config['load/save']['dir'], 'model')
     model.save(save_dir)
@@ -247,13 +272,14 @@ def SaveModel(model, config=None):
 def SaveFrozenGraphV1(model, config=None):
   # see: https://leimao.github.io/blog/Save-Load-Inference-From-TF-Frozen-Graph/
 
-  pb_filepath = os.path.join(config['dir'], 'model.pb')
+  pb_dir = os.path.join(config['dir'])
+  as_txt = config['as-text']
   
   sess = K.get_session()
   graph = tfv1.get_default_graph()
   input_graph_def = graph.as_graph_def()
 
-  # code.interact(local=dict(globals(), **locals()))
+  tfv1.graph_util.remove_training_nodes(input_graph_def)  
 
   output_node_names = [model.output.op.name]
   output_graph_def = tfv1.graph_util.convert_variables_to_constants(sess, input_graph_def, output_node_names)
@@ -262,8 +288,13 @@ def SaveFrozenGraphV1(model, config=None):
 
   pprint.pprint(layers[0])
 
-  with tf.io.gfile.GFile(pb_filepath, 'wb') as f:
-      f.write(output_graph_def.SerializeToString())
+  # code.interact(local=dict(globals(), **locals()))
+  # exit(1)
+
+  tfv1.io.write_graph(output_graph_def, pb_dir, "model.pbtxt", as_text=as_txt)
+
+  # with tf.io.gfile.GFile(pb_filepath, 'wb') as f:
+  #     f.write(output_graph_def.SerializeToString())
 
 
 def SaveForSagemaker(model, config=None):

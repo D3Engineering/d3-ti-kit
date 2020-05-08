@@ -1,0 +1,55 @@
+{
+  "nodes": [
+    {
+      "op": "null", 
+      "name": "input_eval", 
+      "inputs": []
+    }, 
+    {
+      "op": "tvm_op", 
+      "name": "tidl_0", 
+      "attrs": {
+        "num_outputs": "1", 
+        "num_inputs": "1", 
+        "func_name": "tidl_0", 
+        "flatten_data": "0"
+      }, 
+      "inputs": [
+        [
+          0, 
+          0, 
+          0
+        ]
+      ]
+    }
+  ], 
+  "arg_nodes": [0], 
+  "heads": [
+    [
+      1, 
+      0, 
+      0
+    ]
+  ], 
+  "attrs": {
+    "dltype": [
+      "list_str", 
+      [
+        "float32", 
+        "float32"
+      ]
+    ], 
+    "shape": [
+      "list_shape", 
+      [
+        [4, 224, 224, 3], 
+        [4, 2]
+      ]
+    ], 
+    "storage_id": [
+      "list_int", 
+      [0, 1]
+    ]
+  }, 
+  "node_row_ptr": [0, 1, 2]
+}

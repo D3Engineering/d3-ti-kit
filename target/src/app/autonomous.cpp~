@@ -1,0 +1,15 @@
+#include "autonomous.h"
+
+Autonomous::Autonomous(Gui* gui,
+	     Stats* stats,
+	     AbstractModel* model,
+	     AbstractCaptureDisplay* cap_display,
+	     Controller* controller)
+{
+  
+}
+
+void Autonomous::loop()
+{
+  
+}

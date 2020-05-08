@@ -1,0 +1,78 @@
+
+#include "neosample.h"
+
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
+#include <opencv2/core/core.hpp>
+
+using namespace cv;
+
+NeoSample::NeoSample(CaptureConfig& cap_config, ModelConfig& config):
+  _cap_config(cap_config),
+  _config(config)
+{
+  this->_in_width = (size_t)cap_config.disp_width;
+  this->_in_height = (size_t)cap_config.disp_height;
+  
+  this->_width = (size_t)config.infer_width;
+  this->_height = (size_t)config.infer_height;
+  this->_channels = (size_t)config.num_ch;
+  this->_batch = (size_t)config.batch_size;
+  this->_head = 0;
+
+  this->roi.x = config.crop_x;
+  this->roi.y = config.crop_y;
+  this->roi.width = config.infer_width;
+  this->roi.height = config.infer_height;
+
+  size_t frame_size = this->_channels * this->_height * this->_width;
+  size_t buffer_size = frame_size * this->_batch;
+  this->_buffer = new float[buffer_size];
+}
+
+NeoSample::~NeoSample()
+{
+  delete this->_buffer;
+}
+
+void NeoSample::passImage(void* img)
+{
+  // Crop frame
+  Mat frame(cvSize(this->_in_width, this->_in_height),
+            CV_8UC4, img);
+  
+  Mat pic(cvSize(this->_width, this->_height), CV_8UC4, Scalar(0,0,0,0));
+  pic = frame(this->roi);
+  
+  Mat channels[4];
+  split(pic, channels);
+
+  size_t frame_size = this->_width * this->_height;
+  float* head = &this->_buffer[this->_head];
+
+  // Fill buffer in C,H,W format for batch _head
+  memcpy(head, channels[0].ptr(), frame_size);
+  head += frame_size;
+  memcpy(head, channels[1].ptr(), frame_size);
+  head += frame_size;
+  memcpy(head, channels[2].ptr(), frame_size);
+
+  if (this->_head == this->_batch - 1) {
+    this->_is_ready = true;
+  }
+  else if (this->_head == 0) {
+    this->_is_ready = false;
+  }
+  
+  this->_head = (this->_head + 1) % this->_batch;
+}
+
+float* NeoSample::getSample()
+{
+  return this->_buffer;
+}
+
+bool NeoSample::isReady()
+{
+  return this->_is_ready;
+}

@@ -1,0 +1,22 @@
+#pragma once
+
+#include "modelresult.h"
+#include "config.h"
+#include "abstractsample.h"
+
+#include <vector>
+
+using namespace std;
+
+/**
+ * @brief The AbstractModel class abstract class for a model. Real and Fake 
+ * models inherit from this
+ */
+class AbstractModel
+{
+public:
+
+    virtual void addSample(AbstractSample* sample) = 0;
+    virtual bool isResultReady() = 0;
+    virtual vector<ModelResult> GetResults() = 0;
+};

@@ -1,0 +1,53 @@
+#pragma once
+
+#include "config.h"
+#include "stats.h"
+#include "modelresult.h"
+
+#include <opencv2/core/types.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/core/mat.hpp>
+
+#include <string>
+
+using namespace cv;
+using namespace std;
+
+struct TextBox
+{
+  int top, left;
+  float scale;
+
+  TextBox(int top, int left, float scale)
+  {
+    this->top = top;
+    this->left = left;
+    this->scale = scale;
+  }
+
+  void nextLine()
+  {
+    this->top += scale * 40;
+  }
+};
+
+class Gui
+{
+ public:
+  Gui(GuiConfig& config, CaptureConfig& cap_config, cv::Rect roi);
+  ~Gui();
+  
+  void loop(void* overlay, Metrics& metrics);
+  void passResults(vector<ModelResult> results);
+  char getInput();
+
+ protected:
+  GuiConfig _config;
+  CaptureConfig _cap_config;
+  cv::Rect _roi;
+
+  char _input;
+
+  void drawLine(Mat frame, string sr, TextBox& tb);
+  void drawRoi(Mat frame, int thickness);
+};

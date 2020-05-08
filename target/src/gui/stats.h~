@@ -1,0 +1,34 @@
+#pragma once
+
+#include <chrono>
+#include <vector>
+
+using namespace std;
+
+struct Metrics
+{
+  float fps;
+  float ips;
+};
+
+class Stats
+{
+ public:
+  Stats(int ring_size);
+  ~Stats();
+
+  void frame();
+  void inference(int num);
+
+  struct Metrics metrics;
+
+ protected:
+  chrono::time_point<chrono::steady_clock> _frame_timer;
+  chrono::time_point<chrono::steady_clock> _infer_timer;
+
+  vector<int> _frame_duration;
+  vector<int> _infer_duration;
+  size_t _ring_size;
+  int _head;
+
+};

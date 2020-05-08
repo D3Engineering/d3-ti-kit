@@ -1,0 +1,58 @@
+#include "stats.h"
+#include <numeric>
+#include <vector>
+#include <stdio.h>
+
+using namespace std;
+
+Stats::Stats(int ring_size)
+{
+  this->_ring_size = ring_size;
+  this->_frame_timer = chrono::steady_clock::now();
+  this->_infer_timer = chrono::steady_clock::now();
+}
+
+Stats::~Stats()
+{
+}
+
+void Stats::frame()
+{
+  chrono::time_point<chrono::steady_clock> now = chrono::steady_clock::now();
+
+  int ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->_frame_timer).count();
+
+  this->_frame_timer = now;
+  this->_frame_duration.insert(this->_frame_duration.begin(), ms);
+
+  if (this->_frame_duration.size() >= this->_ring_size) {
+    this->_frame_duration.pop_back();
+  }
+
+  this->metrics.fps = accumulate(this->_frame_duration.begin(),
+				  this->_frame_duration.end(),
+				  0);
+  this->metrics.fps = 1000.0 / (this->metrics.fps / this->_frame_duration.size());
+}
+
+
+void Stats::inference(int num)
+{
+  chrono::time_point<chrono::steady_clock> now = chrono::steady_clock::now();
+
+  int ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->_infer_timer).count();
+
+
+  this->_infer_timer = now;
+  this->_infer_duration.insert(this->_infer_duration.begin(), ms);
+
+  if (this->_infer_duration.size() >= this->_ring_size) {
+    this->_infer_duration.pop_back();
+  }
+
+  this->metrics.ips = accumulate(this->_infer_duration.begin(),
+				 this->_infer_duration.end(),
+				 0);
+  this->metrics.ips = 1000.0 / (this->metrics.ips / this->_infer_duration.size());
+  this->metrics.ips *= num;
+}

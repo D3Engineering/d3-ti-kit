@@ -1,0 +1,38 @@
+#pragma once
+
+#include "abstractsample.h"
+#include "config.h"
+
+#include <stdlib.h>
+
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
+
+class NeoSample : public AbstractSample
+{
+ public:
+  NeoSample(CaptureConfig& cap_config, ModelConfig& config);
+  ~NeoSample();
+
+  virtual float* getSample();
+  virtual void passImage(void* img);
+  virtual bool isReady();
+
+  cv::Rect roi;
+
+ protected:
+  size_t _batch;
+  size_t _width;
+  size_t _height;
+  size_t _channels;
+
+  size_t _in_width;
+  size_t _in_height;
+
+  float* _buffer;
+  int _head;
+  bool _is_ready;
+
+  ModelConfig& _config;
+  CaptureConfig& _cap_config;
+};

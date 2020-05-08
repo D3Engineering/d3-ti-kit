@@ -1,0 +1,113 @@
+#include "neomodel.h"
+#include "config.h"
+#include "modelresult.h"
+#include "error.h"
+#include <dlr.h>
+
+#include <stdio.h>
+
+
+NeoModel::NeoModel(ModelConfig& config) :
+_config(config)
+{
+    // NCHW
+    this->_input_shape[0] = config.batch_size;
+    this->_input_shape[2] = config.infer_height;
+    this->_input_shape[3] = config.infer_width;
+    this->_input_shape[1] = config.num_ch;
+    this->_input_name = config._input_name;
+
+    MSG("loading model from: %s... ", config.path.c_str());
+
+    // 0 -> cpu
+    int device = 0; // cpu
+    int err = CreateDLRModel(&this->_model, config.path.c_str(), _input_shape[0], device);
+
+    if (err) {
+        ERROR("Failed\n");
+    }
+    else {
+        MSG("Success\n");
+    }
+
+    this->_neo_results = new float[config.classes];
+}
+
+
+void NeoModel::addSample(AbstractSample* sample)
+{
+    this->_samples.push_back(sample);
+
+    if(this->_samples.size() >= this->_input_shape[0])
+    {
+        this->infer();
+        this->_samples.clear();
+
+    }
+}
+
+
+bool NeoModel::isResultReady()
+{
+    return this->_results_ready;
+}
+
+vector<ModelResult> NeoModel::GetResults()
+{
+    return this->_results;
+}
+
+
+void NeoModel::infer()
+{
+    float* frame;
+    int err;
+    int dim = 4;  // I think this is 4 because there are 4 eve cores
+
+    DBG("setting %i samples\n", (int)this->_input_shape[0]);
+
+    frame = this->_samples[0]->getSample();
+    
+    DBG("Frame: %p, input: (%i,%i,%i,%i)\n",
+           frame,
+           (int)this->_input_shape[0],
+           (int)this->_input_shape[1],
+           (int)this->_input_shape[2],
+           (int)this->_input_shape[3]);
+
+    
+    // Set model input
+    err = SetDLRInput(&this->_model,
+                      this->_input_name.c_str(),
+                      this->_input_shape, 
+                      frame, dim);
+    if (err) {
+        ERROR("Error: Failed to set input\n");
+        return;
+    }
+
+    // Run inference
+    err = RunDLRModel(&this->_model);
+    if (err) {
+        ERROR("ERROR: failed to run model\n");
+        return;
+    }
+
+    this->_results.clear();
+    
+    ModelResult result;
+
+    // For each batch
+    for(int i = 0; i < this->_input_shape[0]; i++)
+    {
+        GetDLROutput(&this->_model, i, this->_neo_results);
+
+        // For each class
+        for(int j = 0; j < this->_config.classes; j++) {
+            result.output[this->_config.labelMap[j]] = this->_neo_results[j];
+        }
+        this->_results.push_back(result);
+    }
+
+    this->_results_ready = true;
+}

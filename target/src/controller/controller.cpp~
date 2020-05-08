@@ -1,0 +1,47 @@
+#include "controller.h"
+
+/**
+ * @brief Controller::Controller constructor for the abstract class of Controller
+ * @param config the JSON config object for the app (a pointer to it)
+ * @param parent
+ */
+Controller::Controller(QJsonObject *config, QObject *parent)
+    : QObject(parent)
+    , _config(config)
+{}
+
+void Controller::initialize()
+{
+    QJsonObject appConfig = this->_config->value("app").toObject();
+    QJsonObject tableConfig = this->_config->value("table").toObject();
+
+    this->numSections = appConfig.value("num_sections").toInt(8);
+    this->_velocity = tableConfig.value("velocity").toDouble(40000);
+
+    this->_ticksPerSection = TICKS_PER_ROTATION / this->numSections;
+}
+
+/**
+ * @brief Controller::~Controller destructor for the Controller
+ */
+Controller::~Controller() {}
+
+/**
+ * @brief Controller::sectionToTicks converts a given section to the number of ticks for the motor
+ * @param section the section number to be converted
+ * @return the number of ticks in the section
+ */
+int Controller::sectionToTicks(double section)
+{
+    return (int) (section * this->_ticksPerSection);
+}
+
+/**
+ * @brief Controller::ticksToSection the opposite of sectionToTicks, returns the section that the number of ticks is in
+ * @param ticks number of ticks to be converted
+ * @return the section number associated with the given ticks
+ */
+double Controller::ticksToSection(double ticks)
+{
+    return (ticks) / (this->_ticksPerSection);
+}

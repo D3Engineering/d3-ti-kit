@@ -1,0 +1,60 @@
+
+#include <stdlib.h>
+
+#include "tvm_app.h"
+#include "config.h"
+
+
+int main(int argc, char* argv[])
+{
+    AppConfig config;
+
+    // Capture config setup
+    config.cap_config.device = "/dev/video1";
+    config.cap_config.capture_width = 1920;
+    config.cap_config.capture_height = 1080;
+
+    // I believe the webcam we are using can only do center-crop
+    // Chainging the values below don't affect the image
+    config.cap_config.crop_x = 800;
+    config.cap_config.crop_y = 420;
+    
+    config.cap_config.disp_width = 320;
+    config.cap_config.disp_height = 240;
+    config.cap_config.zoom = 300;
+    config.cap_config.focus = 75;
+
+    // Model config setup
+    config.model_config.name = "test";
+    config.model_config.path = argv[1];
+    config.model_config.labelMap.push_back("Pass");
+    config.model_config.labelMap.push_back("Fail");
+    config.model_config.batch_size = atoi(argv[2]);
+    config.model_config.infer_width = 224;
+    config.model_config.infer_height = 224;
+    config.model_config.crop_x = 10;
+    config.model_config.crop_y = 10;
+    config.model_config.num_ch = 3;
+    config.model_config._input_name = "input_1";
+    config.model_config.classes = 2;
+
+    // GUI Config
+    config.gui_config.useDefaults();
+    config.gui_config.font_size = 12.0;
+
+    // Table config
+    // Leave blank for now
+
+    TvmApp app(config);
+
+    app.start();
+
+    while (true) {
+        if(!app.loop())
+        {
+            exit(1);
+        }
+    }
+
+    return 0;
+}

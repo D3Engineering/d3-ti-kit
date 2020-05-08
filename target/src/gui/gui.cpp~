@@ -1,0 +1,88 @@
+#include "gui.h"
+#include "modelresult.h"
+#include "error.h"
+
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/imgproc.hpp>
+
+#include <sstream>
+#include <string>
+
+using namespace cv;
+using namespace std;
+
+Gui::Gui(GuiConfig& config, CaptureConfig& cap_config, cv::Rect roi) :
+  _config(config),
+  _cap_config(cap_config)
+{
+  this->_roi = roi;
+}
+
+Gui::~Gui()
+{
+}
+
+void Gui::drawLine(Mat frame, string str, TextBox& tb)
+{
+  cv::putText(frame, str.c_str(), cv::Point(tb.left, tb.top),
+	      FONT_HERSHEY_DUPLEX, tb.scale,
+	      Scalar(255,255,255,200),1);
+  tb.nextLine();
+}
+
+void Gui::drawRoi(Mat frame, int thickness)
+{
+  Scalar color(255,255,255,255);
+  int line_type = 8;
+  int shift = 0;
+  
+  rectangle(frame, this->_roi, color, thickness, line_type, shift);
+}
+
+char Gui::getInput()
+{
+  char tmp = this->_input;
+  this->_input = 0;
+
+  return tmp;
+}
+
+void Gui::loop(void* overlay, Metrics& metrics)
+{
+  int height = this->_cap_config.disp_height;
+  int width = this->_cap_config.disp_width;
+
+  TextBox tb(20, 20, 0.5);
+  
+  Mat frame = cv::Mat(height, width, CV_8UC4, overlay);
+  frame = Scalar(0,0,0,0);
+
+  stringstream fps_ss;
+  fps_ss << "fps: ";
+  fps_ss << metrics.fps;
+
+  stringstream ips_ss;
+  ips_ss << "ips: ";
+  ips_ss << metrics.ips;
+  
+  this->drawLine(frame, fps_ss.str(), tb);
+  this->drawLine(frame, ips_ss.str(), tb);
+  this->drawRoi(frame, 1);
+
+  
+}
+
+void Gui::passResults(vector<ModelResult> results)
+{
+  DBG("Results: %i: ", results.size());
+  for (auto const& r : results) {
+    for (auto const& m : r.output) {
+      DBG("%s: %4.2f, ", m.first.c_str(), m.second);
+    }
+    DBG(" | ");
+  }
+  DBG("\n");
+    
+}

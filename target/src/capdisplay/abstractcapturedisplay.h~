@@ -1,0 +1,26 @@
+#pragma once
+
+#include "modelresult.h"
+#include <string>
+
+using namespace std;
+
+enum CaptureState {SEARCHING = 0, PASS = 1, FAIL = 2};
+/**
+ * @brief The CaptureDisplay class. This class is used for implementing and wrapping GStreamer.
+ */
+class AbstractCaptureDisplay
+{
+public:
+    virtual void* getSample(void) = 0;
+    virtual void returnSample(void* sample) = 0;
+    virtual void* getOverlay() = 0;
+    virtual void dispFrame() = 0;
+
+    virtual bool start(void) = 0;
+    virtual void stop(void) = 0;
+
+    virtual void loop() = 0;
+
+    string model;
+};

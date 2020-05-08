@@ -1,0 +1,56 @@
+#pragma once
+
+#include "abstractmodel.h"
+#include "abstractcapturedisplay.h"
+#include "ticapturedisplay.h"
+#include "abstractsample.h"
+#include "gui.h"
+#include "stats.h"
+// #include "controller.h"
+// #include "gui.h"
+// #include "model.h"
+#include "config.h"
+
+#include <map>
+#include <string>
+#include <chrono>
+
+using namespace std;
+
+/**
+ * @brief The TVM_APP class wrapper class to handle the application
+ *
+ * This is a class to wrap all of the functions of the application.
+ * This handles all of the threads and instances of the different modules. This is effectively a glue layer between everything.
+ */
+class TvmApp
+{
+public:
+    explicit TvmApp(AppConfig& config);
+    ~TvmApp();
+
+    int start();
+    void stop();
+    bool loop();
+
+private:
+
+    AbstractCaptureDisplay *_captureDisplay;        /* instance of the capture display, gst and overlay */
+    AppConfig& _config;
+    // Controller *_controller;                /* table controller */
+    AbstractModel * _model; /* all of the models */
+    AbstractSample* _sample;
+    Gui* _gui;
+    Stats* _stats;
+
+    // TODO: Figure out if I need threading
+    // QThread _captureThread;                 /* thread for the CaptureDisplay */
+    // QThread _controllerThread;              /* thread for the table controller */
+    // QThread _modelThread;
+    
+    // QTimer *_controllerTimer;               /* timer for fake controller */
+    // QTimer *_automousTimer;                 /* timer to trigger autonomous mode */
+    // Autonomous *_autonomous;                /* the instance of the auto mode */
+
+    std::chrono::time_point<std::chrono::steady_clock> _lastIPSClock;
+};

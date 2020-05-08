@@ -1,0 +1,222 @@
+#include "tvm_app.h"
+#include "neomodel.h"
+#include "neosample.h"
+// #include "fakecontroller.h"
+// #include "phidgetcontroller.h"
+
+#define FAKETABLE /* if using a fake table or not */
+/**
+ * @brief TVM_APP::TVM_APP constructor for the TVM_APP
+ * @param config pointer to the JSON object
+ * @param argc pass through argc
+ * @param argv pass through argv
+ * @param model_info list of model_info for the models on the app
+ * @param parent pointer to the parent object
+ */
+TvmApp::TvmApp(AppConfig& config):
+_config(config)
+{
+    // Save these off so they don't go out of scope. It doesn't matter for argv
+    // (most likley) but it does for argc, since it is passed by reference.
+    // see https://doc.qt.io/qt-5/qapplication.html#QApplication
+
+    // this->_gui = new Gui(this->_config);
+    // this->_gui->setModelParams(this->_model_info);
+
+    this->_config = config;
+    this->_captureDisplay = new TICaptureDisplay(this->_config.cap_config);
+    this->_model = new NeoModel(this->_config.model_config);
+    this->_sample = new NeoSample(this->_config.cap_config, this->_config.model_config);
+
+    this->_gui = new Gui(this->_config.gui_config,
+                         this->_config.cap_config,
+                         ((NeoSample*)this->_sample)->roi);
+    this->_stats = new Stats(100);
+
+// #ifndef FAKETABLE
+//     this->_controller = new PhidgetController(this->_config);
+// #else
+//     this->_controller = new FakeController(this->_config);
+//     this->_controllerTimer = new QTimer();
+//     this->_controllerTimer->setInterval(FAKE_DELAY);
+// #endif
+}
+
+/**
+ * @brief TVM_APP::~TVM_APP destructor for the object
+ */
+TvmApp::~TvmApp()
+{
+    this->_captureDisplay->stop();
+}
+
+/**
+ * @brief TVM_APP::start starts the various threads and gui
+ * @return status of the exec function of the app
+ */
+int TvmApp::start()
+{
+    this->_captureDisplay->start();
+
+    return 0;
+}
+
+/**
+ * @brief TVM_APP::stop stops the various threads and such
+ */
+void TvmApp::stop()
+{
+    this->_captureDisplay->stop();
+    // this->_controller->stop();
+    // this->_gui->hide();
+    // this->_gui->close();
+
+    // for (const ModelInfo &mi : this->_model_info) {
+    //     this->_models[mi.name]->close();
+    // }
+    delete this->_model;
+    delete this->_captureDisplay;
+    delete this->_sample;
+    delete this->_gui;
+    delete this->_stats;
+}
+
+bool TvmApp::loop()
+{
+    void* img = this->_captureDisplay->getSample();
+    void* overlay = this->_captureDisplay->getOverlay();
+    this->_stats->frame();
+    
+    this->_sample->passImage(img);
+    if (this->_sample->isReady()) {
+        this->_model->addSample(this->_sample);
+        DBG("Passed sample to Model\n");
+    }
+    
+    if (this->_model->isResultReady()) {
+        vector<ModelResult> results = this->_model->GetResults();
+        this->_gui->passResults(results);
+        
+        this->_stats->inference(4);
+        DBG("Got results from Model\n");
+    }
+
+    this->_gui->loop(overlay, this->_stats->metrics);
+    this->_captureDisplay->dispFrame();
+
+    return true;
+}
+
+// /**
+//  * @brief TVM_APP::autonomous function for the autonomous thread
+//  * @param checked
+//  */
+// void TVM_APP::autonomous(bool checked)
+// {
+//     if (checked) {
+//         if (this->_automousTimer->isActive())
+//             qWarning() << "Autonomous timer wasn't ended. Restarting!";
+//         this->_automousTimer->start();
+//     } else {
+//         if (!this->_automousTimer->isActive())
+//             qWarning() << "Autonomous timer wasn't started!";
+//         this->_automousTimer->stop();
+//     }
+// }
+
+// /**
+//  * @brief TVM_APP::newAppSample callback function that gets called when there is a new sample for the app
+//  */
+// void TVM_APP::newAppSample(void)
+// {
+//     // TODO: move this to wherever table rotation is controlled
+//     this->_captureDisplay->rotation = this->_controller->getSection()
+//                                       / this->_controller->numSections;
+//     if (!this->_active_model)
+//         return;
+//     if (this->_active_model->processing())
+//         return;
+
+//     void *sample = this->_captureDisplay->getSample();
+//     if (!sample)
+//         return;
+
+//     this->_sample_lock.lock();
+//     this->_samples << sample;
+
+// //#warning TODO: Move the following to its own thread. Model::close() must block until processing is complete and buffers are unmapped.
+// #warning Got this working minimally! Just need to threadify (maybe later?)
+
+//     if (this->_samples.size() >= this->_active_model->modelInfo().batchSize) {
+//         QList<cv::Mat> frames;
+
+//         // Pass to model and get inference
+//         for (void *s : this->_samples) {
+//             frames << cv::Mat(cv::Size(width, height),
+//                                 CV_8UC3,
+//                                 (char *) map.data,
+//                                 cv::Mat::AUTO_STEP);
+//         }
+
+//         this->_active_model->setMats(frames);
+//         emit this->processFrames();
+//         //
+
+//         this->_samples.clear();
+//         this->_sample_lock.unlock();
+//     } else {
+//         this->_sample_lock.unlock();
+//     }
+// }
+
+// /**
+//  * @brief TVM_APP::onModelChanged slot to change the active model
+//  * @param modelName
+//  */
+// void TVM_APP::onModelChanged(QString modelName)
+// {
+//     if (this->_active_model)
+//         this->_active_model->close();
+//     this->_returnSamples();
+//     auto iter = this->_models.find(modelName);
+//     if (iter == this->_models.end())
+//         return;
+//     this->_active_model = *iter;
+// }
+
+// /**
+//  * @brief TVM_APP::_returnSamples clears out the samples
+//  */
+// void TVM_APP::_returnSamples()
+// {
+//     for (GstSample *s : this->_samples)
+//         this->_captureDisplay->returnSample(s);
+//     this->_samples.clear();
+// }
+
+// /**
+//  * @brief TVM_APP::onModelComplete slot for when the model has completed processing
+//  */
+// void TVM_APP::onModelComplete()
+// {
+//     QList<ModelResult> results = this->_active_model->results();
+//     if (!results.size())
+//         return;
+//     ModelResult *topModel = &results.front();
+//     for (ModelResult x : results) {
+//         if (x.probability > topModel->probability)
+//             topModel = &x;
+//     }
+//     if (topModel)
+//         this->_captureDisplay->setResult(topModel);
+//     this->_inferenceCount += results.size();
+//     if (this->_inferenceCount >= this->_inferenceThreshold) {
+//         auto now = std::chrono::steady_clock::now();
+//         auto lastClock = this->_lastIPSClock;
+//         this->_lastIPSClock = now;
+//         std::chrono::duration<double> diff = now - lastClock;
+//         this->_captureDisplay->ips = this->_inferenceCount / (diff.count());
+//         this->_inferenceCount = 0;
+//     }
+//     this->_active_model->deleteMats();
+// }

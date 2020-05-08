@@ -1,0 +1,19 @@
+cmake_minimum_required(VERSION 3.10)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm_omap)
+
+add_library(ti-acc
+	cmem_buf.cpp
+	disp_obj.cpp
+	save_utils.cpp
+	vip_obj.cpp
+	vpe_obj.cpp
+	utils/perf_stats/src/app_perf_stats_linux.c
+	utils/perf_stats/src/app_perf_stats_api.c)
+
+target_include_directories(ti-acc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+		
+target_link_libraries(ti-acc LINK_PUBLIC
+	ticmem
+	PkgConfig::DRM)

@@ -1,0 +1,37 @@
+#pragma once
+
+#include "abstractmodel.h"
+#include "config.h"
+#include "modelresult.h"
+
+#include <string>
+#include <dlr.h>
+
+using namespace std;
+
+class NeoModel : public AbstractModel
+{
+public:
+    explicit NeoModel(ModelConfig& config);
+    ~NeoModel();
+
+    virtual void addSample(AbstractSample* sample);
+    virtual bool isResultReady();
+    virtual vector<ModelResult> GetResults();
+
+protected:
+
+    void infer();
+
+    int64_t _input_shape[4];
+    string _input_name;
+    DLRModelHandle _model;
+    ModelConfig& _config;
+
+    bool _results_ready;
+
+    vector<float> model_output;
+    vector<ModelResult> _results;
+    vector<AbstractSample*> _samples;
+    float* _neo_results;
+};

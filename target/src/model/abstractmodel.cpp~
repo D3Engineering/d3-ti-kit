@@ -1,0 +1,36 @@
+#include "abstractmodel.h"
+#include "modelresult.h"
+
+/**
+ * @brief AbstractModel::AbstractModel constructor for the abstract class for the models
+ */
+AbstractModel::AbstractModel(ModelConfig& config) :
+_config(config)
+{
+}
+
+
+void AbstractModel::addSample(AbstractSample* sample)
+{
+    this->_samples.push_back(sample);
+}
+
+vector<ModelResult> AbstractModel::infer()
+{
+    vector<ModelResult> results;
+
+    for (auto sample : this->_samples)
+    {
+        ModelResult result;
+        vector<float> vec = this->run_inference(sample);
+        for(int i = 0; i < vec.size(); i++)
+        {
+            string label = this->_config.labelMap[i];
+            result.output[label] = vec[i];
+        }
+
+        results.push_back(result);
+    }
+
+    return results;
+}

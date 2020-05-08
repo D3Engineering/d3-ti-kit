@@ -2,6 +2,7 @@ import copy
 import code
 import json
 import os
+import datetime as dt
 
 def _dictIter(d, keys):
     for k in d:
@@ -27,8 +28,7 @@ def _dictSet(d, keys, val):
 
 def _hash_config(config):
     config_json = json.dumps(config, sort_keys=True)
-    h = hex(hash(config_json))
-    config['hash'] = h[2:]
+    config['hash'] = dt.datetime.now().strftime("%y-%m-%d_%H:%M:%S")
 
     export_dir = "{}-".format(config['prefix'])
     export_dir += "{}_".format(config['training']['optimizer'])
@@ -55,17 +55,17 @@ def GenConfigs():
         'local': False,
         
         'data': {
-            'path': './data/lens_screw',
+            'path': './data/jkiggins_lens_screw',
             'train': 0.6,
             'valid': 0.2,
             'test': 0.2,
 
             'augment': {
-                'enabled': [False],
-                'translate-x': [None],
-                'translate-y': [None],
-                'hflip': [False],
-                'vflip': [False],
+                'enabled': [True],
+                'translate-x': [True],
+                'translate-y': [True],
+                'hflip': [True],
+                'vflip': [True],
             },
 
             'gan-augment': {
@@ -75,13 +75,13 @@ def GenConfigs():
 
         'training':
         {
-            'epochs': [1],
+            'epochs': [100],
             'optimizer': ['sgd'],
             'lr': 0.0001,
             'batch-size': [32],
-            'transfer-learn': False,
+            'transfer-learn': True,
 
-            'checkpoint': False,
+            'checkpoint': True,
             'early-stop': [False],
             'reduce-plateau': {
                 'enabled': [True],
@@ -93,8 +93,9 @@ def GenConfigs():
             'alpha': 1.0,
             'image-shape': (224,224,3),
             'eval': False,
-            'eval-batch-size': 1,
+            'eval-batch-size': 4,
             'classes': 2,
+            'nchw': True,
 
             'regularize': {
                 'in-conv': {
@@ -127,7 +128,8 @@ def GenConfigs():
 
         'load/save':
         {
-            'dir': 'artifacts'
+            'dir': 'artifacts',
+            'as-text': False
         }   
     }
 
