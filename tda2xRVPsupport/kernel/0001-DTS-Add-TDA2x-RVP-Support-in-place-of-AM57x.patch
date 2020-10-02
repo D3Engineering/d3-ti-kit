@@ -1,0 +1,94 @@
+From 147fb23b5b8d32d1d3af409b2c18b707c577b3be Mon Sep 17 00:00:00 2001
+From: Ben McGee <benmcgee@d3engineering.com>
+Date: Fri, 2 Oct 2020 17:39:39 -0400
+Subject: [PATCH] DTS: Add TDA2x RVP Support in place of AM57x
+
+---
+ arch/arm/boot/dts/am57xx-beagle-x15-common.dtsi | 23 +++++++++++++++++------
+ arch/arm/boot/dts/am57xx-beagle-x15.dts         |  4 +---
+ 2 files changed, 18 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/boot/dts/am57xx-beagle-x15-common.dtsi b/arch/arm/boot/dts/am57xx-beagle-x15-common.dtsi
+index 09f123c..40d26db 100644
+--- a/arch/arm/boot/dts/am57xx-beagle-x15-common.dtsi
++++ b/arch/arm/boot/dts/am57xx-beagle-x15-common.dtsi
+@@ -79,6 +79,14 @@
+ 		regulator-always-on;
+ 		regulator-boot-on;
+ 	};
++	vmain: fixedregulator-vmain {
++		compatible = "regulator-fixed";
++		regulator-name = "VDD_3V3_IN";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++		regulator-boot-on;
++	};
+ 
+ 	evm_5v0: fixedregulator-evm_5v0 {
+ 		/* Output of TPS54531D */
+@@ -285,14 +293,16 @@
+ 				/* SMPS7 unused */
+ 
+ 				smps8_reg: smps8 {
+-					/* VDD_1V8 */
++					/* VDD_IVAHD */
++					vin-supply = <&vmain>;
+ 					regulator-name = "smps8";
+-					regulator-min-microvolt = <1800000>;
+-					regulator-max-microvolt = <1800000>;
++					regulator-min-microvolt = <1050000>;
++					regulator-max-microvolt = <1250000>;
+ 					regulator-always-on;
+ 					regulator-boot-on;
+ 				};
+ 
++
+ 				/* SMPS9 unused */
+ 
+ 				ldo1_reg: ldo1 {
+@@ -314,6 +324,7 @@
+ 				};
+ 
+ 				ldo3_reg: ldo3 {
++					vin-supply = <&vmain>;
+ 					/* VDDA_1V8_PHYA */
+ 					regulator-name = "ldo3";
+ 					regulator-min-microvolt = <1800000>;
+@@ -462,8 +473,8 @@
+ 		reg = <1>;
+ 	};
+ 
+-	phy1: ethernet-phy@2 {
+-		reg = <2>;
++	phy1: ethernet-phy@0 {
++		reg = <0>;
+ 	};
+ };
+ 
+@@ -603,7 +614,7 @@
+ 
+ &hdmi {
+ 	status = "ok";
+-	vdda-supply = <&ldo4_reg>;
++	vdda-supply = <&ldo3_reg>;
+ 
+ 	port {
+ 		hdmi_out: endpoint {
+diff --git a/arch/arm/boot/dts/am57xx-beagle-x15.dts b/arch/arm/boot/dts/am57xx-beagle-x15.dts
+index 012c1bb..e6f4a19 100644
+--- a/arch/arm/boot/dts/am57xx-beagle-x15.dts
++++ b/arch/arm/boot/dts/am57xx-beagle-x15.dts
+@@ -36,8 +36,6 @@
+ };
+ 
+ /* errata i880 "Ethernet RGMII2 Limited to 10/100 Mbps" */
+-&phy1 {
+-	max-speed = <100>;
+-};
++
+ 
+ #include "am57xx-evm-cmem.dtsi"
+-- 
+2.7.4
+

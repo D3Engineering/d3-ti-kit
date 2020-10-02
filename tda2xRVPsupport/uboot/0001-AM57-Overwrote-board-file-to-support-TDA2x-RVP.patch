@@ -1,0 +1,1547 @@
+From c382c13fee1c8f79c64ea8e6fcdc79cbef57ce5c Mon Sep 17 00:00:00 2001
+From: Ben McGee <benmcgee@d3engineering.com>
+Date: Fri, 2 Oct 2020 17:43:39 -0400
+Subject: [PATCH] AM57:Overwrote board file to support TDA2x RVP
+
+---
+ board/ti/am57xx/board.c      | 914 +++++++++++++++++++++++++++++++++++++++----
+ board/ti/am57xx/mux_data.h   | 424 ++++++--------------
+ configs/am57xx_evm_defconfig |   7 +-
+ 3 files changed, 972 insertions(+), 373 deletions(-)
+
+diff --git a/board/ti/am57xx/board.c b/board/ti/am57xx/board.c
+index c1f0525..98d5af0 100644
+--- a/board/ti/am57xx/board.c
++++ b/board/ti/am57xx/board.c
+@@ -32,10 +32,49 @@
+ #include <ti-usb-phy-uboot.h>
+ #include <mmc.h>
+ #include <dm/uclass.h>
++#include <i2c.h>
+ 
+ #include "../common/board_detect.h"
+ #include "mux_data.h"
+ 
++#define L4_CFG_TARG						0x4A000000
++#define CTRL_MODULE_CORE				(L4_CFG_TARG + 0x2000)
++#define CM_CORE							(L4_CFG_TARG + 0x8000)
++#define CORE_CM_CORE					(CM_CORE + 0x700)
++#define DSS_CM_CORE						(CM_CORE + 0x1100)
++#define CM_L3INSTR_L3_MAIN_2_CLKCTRL	(CORE_CM_CORE + 0x728)
++#define CM_DSS_DSS_CLKCTRL				(DSS_CM_CORE + 0x20)
++#define CM_DSS_CLKSTCTRL				(DSS_CM_CORE + 0x00)
++
++#define CTRL_CORE_CONTROL_IO_2			(CTRL_MODULE_CORE + 0x558)
++/* Registers */
++#define TCA9539_INPUT0_REG 0x00
++#define TCA9539_INPUT1_REG 0x01
++#define TCA9539_OUTPUT0_REG 0x02
++#define TCA9539_OUTPUT1_REG 0x03
++#define TCA9539_POLINV0_REG 0x04
++#define TCA9539_POLINV1_REG 0x05
++#define TCA9539_CONFIG0_REG 0x06
++#define TCA9539_CONFIG1_REG 0x07
++
++/* Offsets */
++#define TCA9539_OFFSET_IO_0_0 (1 << 0)
++#define TCA9539_OFFSET_IO_0_1 (1 << 1)
++#define TCA9539_OFFSET_IO_0_2 (1 << 2)
++#define TCA9539_OFFSET_IO_0_3 (1 << 3)
++#define TCA9539_OFFSET_IO_0_4 (1 << 4)
++#define TCA9539_OFFSET_IO_0_5 (1 << 5)
++#define TCA9539_OFFSET_IO_0_6 (1 << 6)
++#define TCA9539_OFFSET_IO_0_7 (1 << 7)
++#define TCA9539_OFFSET_IO_1_0 (1 << 0)
++#define TCA9539_OFFSET_IO_1_1 (1 << 1)
++#define TCA9539_OFFSET_IO_1_2 (1 << 2)
++#define TCA9539_OFFSET_IO_1_3 (1 << 3)
++#define TCA9539_OFFSET_IO_1_4 (1 << 4)
++#define TCA9539_OFFSET_IO_1_5 (1 << 5)
++#define TCA9539_OFFSET_IO_1_6 (1 << 6)
++#define TCA9539_OFFSET_IO_1_7 (1 << 7)
++
+ #ifdef CONFIG_SUPPORT_EMMC_BOOT
+ static int board_bootmode_has_emmc(void);
+ #endif
+@@ -60,6 +99,68 @@ static int board_bootmode_has_emmc(void);
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++#define BOARD_ID_ADDR	0x74
++#define BOARD_ID_REG_P0	0x00
++#define BOARD_ID_MASK	0x7F
++
++/* SOM ID is 7 bits. 8th bit is PCB. */
++enum board_id {
++	BOARD_TDA2ECO_REV1 = 0x00,
++	BOARD_TDA2ECO_REV2 = 0x08,
++
++	BOARD_TDA2DE_REV1 = 0x01,
++	BOARD_TDA2DE_REV2 = 0x06,
++	BOARD_TDA2DE_REV3 = 0x09,
++
++	BOARD_TDA2ECO_AM571X_REV1 = 0x02,
++	BOARD_TDA2ECO_AM572X_REV1 = 0x03,
++	BOARD_TDA2ECO_TDA2X_REV1 = 0x04,
++};
++
++#define BASEBOARD_ID_ADDR	0x75
++#define BASEBOARD_8CH_REV1_ID_ADDR	0x76
++#define BASEBOARD_ID_REG_P1	0x01
++#define BASEBOARD_ID_MASK	0xFF
++/* baseboard ID is 8 bits. */
++enum baseboard_id {
++	BASEBOARD_TDA2ECO_FPD4CH_REV1 = 0x00,
++
++	BASEBOARD_TDA2XDE_FPD8CH_REV1 = 0x05,
++	BASEBOARD_TDA2XDE_FPD8CH_REV2 = 0x07,
++};
++
++/* TODO: Switch from MEM address to ID 0x5F  */
++#define EXPANSION_ID_EEPROM_ADDR 0x57
++
++enum expansion_id {
++	EXPANSION_934DES = 0x00,
++};
++
++
++
++/* GPIO 7_11 */
++#define GPIO_DDR_VTT_EN 203
++
++/* pcf chip address enet_mux_s0 */
++#define PCF_ENET_MUX_ADDR	0x21
++#define PCF_SEL_ENET_MUX_S0	4
++
++#define SYSINFO_BOARD_NAME_MAX_LEN	37
++
++#define FPD8CH_GPIO_EXP2_BUS 3
++#define FPD8CH_GPIO_EXP2_ADDR 0x76
++#define FPD8CH_GPIO_FPD_EXPA_BUS 3
++#define FPD8CH_GPIO_FPD_EXPA_ADDR 0x74
++#define FPD8CH_GPIO_FPD_EXPB_BUS 4
++#define FPD8CH_GPIO_FPD_EXPB_ADDR 0x74
++
++#define TPM_GPIO_BUS 0
++#define TPM_GPIO_ADDR 0x74
++
++const struct omap_sysinfo sysinfo = {
++	"Board: D3 TDA2x\n"
++};
++
+ #define GPIO_ETH_LCD		GPIO_TO_PIN(2, 22)
+ /* GPIO 7_11 */
+ #define GPIO_DDR_VTT_EN 203
+@@ -82,10 +183,6 @@ DECLARE_GLOBAL_DATA_PTR;
+ #define TPS65903X_PRIMARY_SECONDARY_PAD2	0xFB
+ #define TPS65903X_PAD2_POWERHOLD_MASK		0x20
+ 
+-const struct omap_sysinfo sysinfo = {
+-	"Board: UNKNOWN(BeagleBoard X15?) REV UNKNOWN\n"
+-};
+-
+ static const struct dmm_lisa_map_regs beagle_x15_lisa_regs = {
+ 	.dmm_lisa_map_3 = 0x80740300,
+ 	.is_ma_present  = 0x1
+@@ -477,6 +574,644 @@ struct vcores_data am571x_idk_volts = {
+ 	.iva.abb_tx_done_mask	= OMAP_ABB_IVA_TXDONE_MASK,
+ };
+ 
++static int read_baseboard_id(void)
++{
++	unsigned char val;
++	int baseboard_id = -1;
++
++	if (!i2c_read(BASEBOARD_ID_ADDR, BASEBOARD_ID_REG_P1, 1, &val, sizeof(val))) {
++		switch (val & BASEBOARD_ID_MASK) {
++		/* Fallthroughs are intentional */
++		case BASEBOARD_TDA2ECO_FPD4CH_REV1:
++		case BASEBOARD_TDA2XDE_FPD8CH_REV1:
++		case BASEBOARD_TDA2XDE_FPD8CH_REV2:
++			baseboard_id = val;
++			break;
++		default:
++			break;
++		}
++	} else if (!i2c_read(BASEBOARD_8CH_REV1_ID_ADDR, BASEBOARD_ID_REG_P1, 1, &val, sizeof(val))) {
++		/* REV1 8 channel baseboards had the ID IO expander at the wrong address */
++		switch (val & BASEBOARD_ID_MASK) {
++		case BASEBOARD_TDA2XDE_FPD8CH_REV1:
++			baseboard_id = val;
++			break;
++		default:
++			break;
++		}
++	}
++
++	return baseboard_id;
++}
++
++static void fpd8ch_fpd_init(void)
++{
++	int board_id;
++	uint8_t buf[] = {0x00};
++	int retval = 0;
++	int prev_bus = 0;
++
++	board_id = read_baseboard_id();
++	switch (board_id) {
++	case BASEBOARD_TDA2XDE_FPD8CH_REV1:
++	case BASEBOARD_TDA2XDE_FPD8CH_REV2:
++		break;
++	default: /* Somehow this got called on a non-8ch baseboard */
++		return;
++	}
++
++	/* u-boot's I2C core has the current bus as hidden state,
++	   save the bus so we can restore it later. */
++	prev_bus = i2c_get_bus_num();
++
++	/* The following is for rework 4 of Rev1 baseboards */
++	if(board_id == BASEBOARD_TDA2XDE_FPD8CH_REV1) {
++		i2c_set_bus_num(FPD8CH_GPIO_FPD_EXPB_BUS);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~TCA9539_OFFSET_IO_1_7;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		/* De-assert FPD_934_PDB for the first 934 */
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~TCA9539_OFFSET_IO_1_7;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		udelay(1);
++
++		/* Assert FPD_934_PDB for the first 934 */
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_7;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD_934_PDB1\n");
++			goto cleanup;
++		}
++
++		udelay(5000);
++
++		i2c_set_bus_num(FPD8CH_GPIO_EXP2_BUS);
++
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~TCA9539_OFFSET_IO_1_7;
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		/* De-assert FPD_934_PDB for the second set of 934s */
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~TCA9539_OFFSET_IO_1_7;
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		udelay(1);
++
++		/* Assert FPD_934_PDB for the second set of 934s */
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_7;
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD_934_PDB2\n");
++			goto cleanup;
++		}
++
++		udelay(5000);
++	}
++
++	if(board_id == BASEBOARD_TDA2XDE_FPD8CH_REV1) {
++		i2c_set_bus_num(FPD8CH_GPIO_EXP2_BUS);
++
++		/* Pull FPD_934_PDB low to guarantee that the FPD power sequencing is correct */
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~TCA9539_OFFSET_IO_1_0;
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~TCA9539_OFFSET_IO_1_0;
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		udelay(1);
++
++		/* Assert FPD_934_PDB to wake up the 934s */
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_0;
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD_934_PDB\n");
++			goto cleanup;
++		}
++	} else {
++		i2c_set_bus_num(FPD8CH_GPIO_FPD_EXPA_BUS);
++
++		/* Pull each PDB low to guarantee that the FPD power sequencing is correct */
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_0_1 | TCA9539_OFFSET_IO_0_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_CONFIG0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_0_1 | TCA9539_OFFSET_IO_0_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_CONFIG0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_1_1 | TCA9539_OFFSET_IO_1_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_1_1 | TCA9539_OFFSET_IO_1_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		udelay(1);
++
++		i2c_set_bus_num(FPD8CH_GPIO_FPD_EXPB_BUS);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_0_1 | TCA9539_OFFSET_IO_0_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_CONFIG0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_0_1 | TCA9539_OFFSET_IO_0_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_CONFIG0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_1_1 | TCA9539_OFFSET_IO_1_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_1_1 | TCA9539_OFFSET_IO_1_5);
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		udelay(1);
++
++		/* Assert FPD_934_PDB to wake up the 934s
++		   Each is separate to ensure that our voltage rails don't droop */
++
++		i2c_set_bus_num(FPD8CH_GPIO_FPD_EXPA_BUS);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_0_1;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD1_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_0_5;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD2_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_1;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD3_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_5;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD4_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		i2c_set_bus_num(FPD8CH_GPIO_FPD_EXPB_BUS);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_0_1;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD5_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_0_5;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT0_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD6_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_1;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD7_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++
++		retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] |= TCA9539_OFFSET_IO_1_5;
++			retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to assert FPD8_PDB\n");
++			goto cleanup;
++		}
++
++		udelay(100);
++	}
++
++	i2c_set_bus_num(FPD8CH_GPIO_EXP2_BUS);
++
++	/* Pull FPD_925_PDB low to guarantee that the power sequencing is correct */
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_OUTPUT1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~TCA9539_OFFSET_IO_1_1;
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_OUTPUT1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~TCA9539_OFFSET_IO_1_1;
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	udelay(1);
++
++	/* Assert FPD_925_PDB to wake up the 925 */
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_OUTPUT1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] |= TCA9539_OFFSET_IO_1_1;
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_OUTPUT1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to assert FPD_925_PDB\n");
++		goto cleanup;
++	}
++
++	/* Initialize SEPIC A & B to 12V */
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_0 | TCA9539_OFFSET_IO_0_4);
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++
++	}
++
++	if (retval != 0) {
++		printf("Failed to set SEPIC A & B to 12V\n");
++		goto cleanup;
++	}
++
++	udelay(2);
++
++	/* Enable SEPIC A & B */
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_1 | TCA9539_OFFSET_IO_0_5);
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to enable SEPIC A & B\n");
++		goto cleanup;
++	}
++
++	udelay(2);
++
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_3 | TCA9539_OFFSET_IO_0_7);
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to enable DIAG_EN A & B output\n");
++		goto cleanup;
++	}
++
++	/* Enable FPD SW A & B */
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_2 | TCA9539_OFFSET_IO_0_6);
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to enable FPD SW A & B\n");
++		goto cleanup;
++	}
++
++	if(board_id == BASEBOARD_TDA2XDE_FPD8CH_REV2) {
++		/* Assert BUS_CTL_VIN3A low */
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_1_0);
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_OUTPUT1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		if (retval == 0) {
++			buf[0] &= ~(TCA9539_OFFSET_IO_1_0);
++			retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++				TCA9539_CONFIG1_REG, 1,
++				buf, ARRAY_SIZE(buf));
++		}
++
++		if (retval != 0) {
++			printf("Failed to enable BUS_CTL_VIN3A\n");
++			goto cleanup;
++		}
++	}
++
++	/* Assert FPD1_OEN & FPD2_OEN */
++	retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_0 | TCA9539_OFFSET_IO_0_4);
++		retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to assert FPD1_OEN & FPD2_OEN\n");
++		goto cleanup;
++	}
++
++	/* Assert FPD3_OEN & FPD4_OEN */
++	retval = i2c_read(FPD8CH_GPIO_FPD_EXPA_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_1_0 | TCA9539_OFFSET_IO_1_4);
++		retval = i2c_write(FPD8CH_GPIO_FPD_EXPA_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to assert FPD3_OEN & FPD4_OEN\n");
++		goto cleanup;
++	}
++
++	i2c_set_bus_num(FPD8CH_GPIO_FPD_EXPB_BUS);
++
++	/* Assert VIN5A Low */
++	retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++			TCA9539_OUTPUT0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_3);
++		retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++			TCA9539_OUTPUT0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to assert BUS_CTL_VIN5\n");
++		goto cleanup;
++	}
++
++	/* Assert FPD5_OEN & FPD6_OEN & BUS_CTL_VIN5A & BUS_CTL_VOUT1_L */
++	retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_0_0 | TCA9539_OFFSET_IO_0_4 |
++				TCA9539_OFFSET_IO_0_3 | TCA9539_OFFSET_IO_0_7);
++		retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++			TCA9539_CONFIG0_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to enable FPD5_OEN & FPD6_OEN & BUS_CTL_VIN5 & BUS_CTL_VOUT1_L\n");
++		goto cleanup;
++	}
++
++	/* Assert FPD7_OEN & FPD8_OEN & BUS_CTL_VOUT1_U */
++	retval = i2c_read(FPD8CH_GPIO_FPD_EXPB_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		buf[0] &= ~(TCA9539_OFFSET_IO_1_0 | TCA9539_OFFSET_IO_1_4 | TCA9539_OFFSET_IO_1_3);
++		retval = i2c_write(FPD8CH_GPIO_FPD_EXPB_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	}
++
++	if (retval != 0) {
++		printf("Failed to assert FPD7_OEN & FPD8_OEN & BUS_CTL_VOUT1_U\n");
++		goto cleanup;
++	}
++
++cleanup:
++	i2c_set_bus_num(prev_bus);
++}
++
+ int get_voltrail_opp(int rail_offset)
+ {
+ 	int opp;
+@@ -652,7 +1387,7 @@ int board_init(void)
+ 
+ 	return 0;
+ }
+-
++#if 0
+ void am57x_idk_lcd_detect(void)
+ {
+ 	int r = -ENODEV;
+@@ -717,6 +1452,42 @@ out:
+ 
+ 	return;
+ }
++#endif
++static void fpd8ch_eth_init(void)
++{
++	uint8_t buf[] = {0x00};
++	int retval = 0;
++	int prev_bus = 0;
++	/* u-boot's I2C core has the current bus as hidden state,
++	   save the bus so we can restore it later. */
++	prev_bus = i2c_get_bus_num();
++	i2c_set_bus_num(FPD8CH_GPIO_EXP2_BUS);
++	printf("doign the ethernet pinmnuxing\n");
++	/* ENET_RSTn is pulled low by a pull-down resistor,
++	   the pin needs to be driven high to enable the PHY. */
++	retval = i2c_read(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++	if (retval == 0) {
++		/* For the 8-ch baseboard IO 1.6 of GPIO_EXP2 is ENET_RSTn */
++		buf[0] &= ~TCA9539_OFFSET_IO_1_6;
++		retval = i2c_write(FPD8CH_GPIO_EXP2_ADDR,
++			TCA9539_CONFIG1_REG, 1,
++			buf, ARRAY_SIZE(buf));
++
++	}
++
++	if (retval != 0) {
++		printf("Failed to deassert ENET_RSTn\n");
++	}
++
++	do_set_mux32((*ctrl)->control_padconf_core_base,
++		mdio_padconf_d3_tda2xde_fpd8ch,
++		ARRAY_SIZE(mdio_padconf_d3_tda2xde_fpd8ch));
++
++	i2c_set_bus_num(prev_bus);
++}
++
+ 
+ #if CONFIG_IS_ENABLED(DM_USB) && CONFIG_IS_ENABLED(OF_CONTROL)
+ static int device_okay(const char *path)
+@@ -735,6 +1506,7 @@ int board_late_init(void)
+ {
+ 	setup_board_eeprom_env();
+ 	u8 val;
++	uint32_t reg;
+ 	struct udevice *dev;
+ 
+ 	/*
+@@ -764,11 +1536,26 @@ int board_late_init(void)
+ 
+ 	omap_die_id_serial();
+ 	omap_set_fastboot_vars();
+-
+-	am57x_idk_lcd_detect();
++#if 0
++	reg = __raw_readl(CTRL_CORE_CONTROL_IO_2);
++	__raw_writel((reg | 0x1), CTRL_CORE_CONTROL_IO_2);
++	reg = __raw_readl(CM_DSS_DSS_CLKCTRL);
++	__raw_writel(((reg & ~0x00000003) | 0x00003F00 | 0x2), CM_DSS_DSS_CLKCTRL);
++
++	/* checking if DSS is enabled */
++	while ((__raw_readl(CM_DSS_DSS_CLKCTRL) & 0x00030000) != 0);
++#endif
++	//am57x_idk_lcd_detect();
+ 
+ 	/* Just probe the potentially supported cdce913 device */
+-	uclass_get_device(UCLASS_CLK, 0, &dev);
++	//uclass_get_device(UCLASS_CLK, 0, &dev);
++	volatile unsigned int* tmp;
++	tmp =  	(unsigned int *)0x5804030C;
++	*tmp = 0x70000000;
++
++	do_set_mux32((*ctrl)->control_padconf_core_base,
++	mdio_padconf_d3_tda2xde_fpd8ch,
++	ARRAY_SIZE(mdio_padconf_d3_tda2xde_fpd8ch));
+ 
+ 	if (board_is_bbai())
+ 		env_set("console", "ttyS0,115200n8");
+@@ -804,7 +1591,7 @@ void recalibrate_iodelay(void)
+ 	const struct iodelay_cfg_entry *iod, *delta_iod;
+ 	int pconf_sz, iod_sz, delta_iod_sz = 0;
+ 	int ret;
+-
++#if 0
+ 	if (board_is_am572x_idk()) {
+ 		pconf = core_padconf_array_essential_am572x_idk;
+ 		pconf_sz = ARRAY_SIZE(core_padconf_array_essential_am572x_idk);
+@@ -839,6 +1626,14 @@ void recalibrate_iodelay(void)
+ 			iod_sz = ARRAY_SIZE(iodelay_cfg_array_x15_sr2_0);
+ 		}
+ 	}
++#endif
++
++	pconf = core_padconf_array_essential_x15;
++	pconf_sz = ARRAY_SIZE(core_padconf_array_essential_x15);
++	iod = iodelay_cfg_array_x15_sr1_1;
++	iod_sz = ARRAY_SIZE(iodelay_cfg_array_x15_sr1_1);
++	fpd8ch_eth_init();
++
+ 
+ 	/* Setup I/O isolation */
+ 	ret = __recalibrate_iodelay_start();
+@@ -847,7 +1642,7 @@ void recalibrate_iodelay(void)
+ 
+ 	/* Do the muxing here */
+ 	do_set_mux32((*ctrl)->control_padconf_core_base, pconf, pconf_sz);
+-
++#if 0
+ 	/* Now do the weird minor deltas that should be safe */
+ 	if (board_is_x15() || board_is_am572x_evm()) {
+ 		if (board_is_x15_revb1() || board_is_am572x_evm_reva3() ||
+@@ -874,6 +1669,8 @@ void recalibrate_iodelay(void)
+ 		}
+ 		do_set_mux32((*ctrl)->control_padconf_core_base, pconf, pconf_sz);
+ 	}
++#endif
++	fpd8ch_fpd_init();
+ 
+ 	/* Setup IOdelay configuration */
+ 	ret = do_set_iodelay((*ctrl)->iodelay_config_base, iod, iod_sz);
+@@ -1017,89 +1814,58 @@ static void u64_to_mac(u64 addr, u8 mac[6])
+ 	mac[0] = addr >> 40;
+ }
+ 
++static struct cpsw_slave_data cpsw_slaves_fpd8ch[] = {
++	{
++		.slave_reg_ofs	= 0x208,
++		.sliver_reg_ofs	= 0xd80,
++		.phy_addr	= 2,
++	},
++	{
++		.slave_reg_ofs	= 0x308,
++		.sliver_reg_ofs	= 0xdc0,
++		.phy_addr	= 0,
++	},
++};
++
++
++
+ int board_eth_init(bd_t *bis)
+ {
+ 	int ret;
+-	uint8_t mac_addr[6];
+-	uint32_t mac_hi, mac_lo;
++	int baseboard_id;
++	uint8_t *mac_addr;
++	uint8_t mac_addr_arr[12];
+ 	uint32_t ctrl_val;
+-	int i;
+-	u64 mac1, mac2;
+-	u8 mac_addr1[6], mac_addr2[6];
+-	int num_macs;
+-
+-	/* try reading mac address from efuse */
+-	mac_lo = readl((*ctrl)->control_core_mac_id_0_lo);
+-	mac_hi = readl((*ctrl)->control_core_mac_id_0_hi);
+-	mac_addr[0] = (mac_hi & 0xFF0000) >> 16;
+-	mac_addr[1] = (mac_hi & 0xFF00) >> 8;
+-	mac_addr[2] = mac_hi & 0xFF;
+-	mac_addr[3] = (mac_lo & 0xFF0000) >> 16;
+-	mac_addr[4] = (mac_lo & 0xFF00) >> 8;
+-	mac_addr[5] = mac_lo & 0xFF;
+-
+-	if (!env_get("ethaddr")) {
++
++	read_mac_addr_from_efuse(mac_addr_arr);
++
++	mac_addr = &mac_addr_arr[0];
++	if (!getenv("ethaddr")) {
+ 		printf("<ethaddr> not set. Validating first E-fuse MAC\n");
+ 
+ 		if (is_valid_ethaddr(mac_addr))
+-			eth_env_set_enetaddr("ethaddr", mac_addr);
++			eth_setenv_enetaddr("ethaddr", mac_addr);
+ 	}
++	printf("IN BOARD ETH INIT\n");
++	baseboard_id = read_baseboard_id();
++	cpsw_data.slaves = ARRAY_SIZE(cpsw_slaves_fpd8ch);
++	cpsw_data.slave_data = cpsw_slaves_fpd8ch;
+ 
+-	mac_lo = readl((*ctrl)->control_core_mac_id_1_lo);
+-	mac_hi = readl((*ctrl)->control_core_mac_id_1_hi);
+-	mac_addr[0] = (mac_hi & 0xFF0000) >> 16;
+-	mac_addr[1] = (mac_hi & 0xFF00) >> 8;
+-	mac_addr[2] = mac_hi & 0xFF;
+-	mac_addr[3] = (mac_lo & 0xFF0000) >> 16;
+-	mac_addr[4] = (mac_lo & 0xFF00) >> 8;
+-	mac_addr[5] = mac_lo & 0xFF;
+ 
+-	if (!env_get("eth1addr")) {
++	mac_addr = &mac_addr_arr[6];
++	if (!getenv("eth1addr")) {
+ 		if (is_valid_ethaddr(mac_addr))
+-			eth_env_set_enetaddr("eth1addr", mac_addr);
++			eth_setenv_enetaddr("eth1addr", mac_addr);
+ 	}
+ 
+ 	ctrl_val = readl((*ctrl)->control_core_control_io1) & (~0x33);
+ 	ctrl_val |= 0x22;
+ 	writel(ctrl_val, (*ctrl)->control_core_control_io1);
+ 
+-	/* The phy address for the AM57xx IDK are different than x15 */
+-	if (board_is_am572x_idk() || board_is_am571x_idk() ||
+-	    board_is_am574x_idk()) {
+-		cpsw_data.slave_data[0].phy_addr = 0;
+-		cpsw_data.slave_data[1].phy_addr = 1;
+-	}
+-
+ 	ret = cpsw_register(&cpsw_data);
+ 	if (ret < 0)
+ 		printf("Error %d registering CPSW switch\n", ret);
+ 
+-	/*
+-	 * Export any Ethernet MAC addresses from EEPROM.
+-	 * On AM57xx the 2 MAC addresses define the address range
+-	 */
+-	board_ti_get_eth_mac_addr(0, mac_addr1);
+-	board_ti_get_eth_mac_addr(1, mac_addr2);
+-
+-	if (is_valid_ethaddr(mac_addr1) && is_valid_ethaddr(mac_addr2)) {
+-		mac1 = mac_to_u64(mac_addr1);
+-		mac2 = mac_to_u64(mac_addr2);
+-
+-		/* must contain an address range */
+-		num_macs = mac2 - mac1 + 1;
+-		/* <= 50 to protect against user programming error */
+-		if (num_macs > 0 && num_macs <= 50) {
+-			for (i = 0; i < num_macs; i++) {
+-				u64_to_mac(mac1 + i, mac_addr);
+-				if (is_valid_ethaddr(mac_addr)) {
+-					eth_env_set_enetaddr_by_index("eth",
+-								      i + 2,
+-								      mac_addr);
+-				}
+-			}
+-		}
+-	}
+-
+ 	return ret;
+ }
+ #endif
+@@ -1118,6 +1884,7 @@ static inline void vtt_regulator_enable(void)
+ int board_early_init_f(void)
+ {
+ 	vtt_regulator_enable();
++	i2c_early_init_f();
+ 	return 0;
+ }
+ #endif
+@@ -1157,6 +1924,7 @@ int board_fit_config_name_match(const char *name)
+ 		return 0;
+ 	}
+ 
++
+ 	return -1;
+ }
+ #endif
+@@ -1191,6 +1959,8 @@ int fastboot_set_reboot_flag(void)
+ 	env_save();
+ 	return 0;
+ }
++
++
+ #endif
+ 
+ U_BOOT_FIT_LOADABLE_HANDLER(IH_TYPE_TEE, board_tee_image_process);
+diff --git a/board/ti/am57xx/mux_data.h b/board/ti/am57xx/mux_data.h
+index 8a216a7..f2840d4 100644
+--- a/board/ti/am57xx/mux_data.h
++++ b/board/ti/am57xx/mux_data.h
+@@ -12,225 +12,78 @@
+ #include <asm/arch/mux_dra7xx.h>
+ 
+ const struct pad_conf_entry core_padconf_array_essential_x15[] = {
+-	{GPMC_AD0, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad0.vin3a_d0 */
+-	{GPMC_AD1, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad1.vin3a_d1 */
+-	{GPMC_AD2, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad2.vin3a_d2 */
+-	{GPMC_AD3, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad3.vin3a_d3 */
+-	{GPMC_AD4, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad4.vin3a_d4 */
+-	{GPMC_AD5, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad5.vin3a_d5 */
+-	{GPMC_AD6, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad6.vin3a_d6 */
+-	{GPMC_AD7, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad7.vin3a_d7 */
+-	{GPMC_AD8, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad8.vin3a_d8 */
+-	{GPMC_AD9, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad9.vin3a_d9 */
+-	{GPMC_AD10, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad10.vin3a_d10 */
+-	{GPMC_AD11, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad11.vin3a_d11 */
+-	{GPMC_AD12, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad12.vin3a_d12 */
+-	{GPMC_AD13, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad13.vin3a_d13 */
+-	{GPMC_AD14, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad14.vin3a_d14 */
+-	{GPMC_AD15, (M2 | PIN_INPUT | MANUAL_MODE)},	/* gpmc_ad15.vin3a_d15 */
+-	{GPMC_A0, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a0.vin3a_d16 */
+-	{GPMC_A1, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a1.vin3a_d17 */
+-	{GPMC_A2, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a2.vin3a_d18 */
+-	{GPMC_A3, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a3.vin3a_d19 */
+-	{GPMC_A4, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a4.vin3a_d20 */
+-	{GPMC_A5, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a5.vin3a_d21 */
+-	{GPMC_A6, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a6.vin3a_d22 */
+-	{GPMC_A7, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a7.vin3a_d23 */
+-	{GPMC_A8, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a8.vin3a_hsync0 */
+-	{GPMC_A9, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a9.vin3a_vsync0 */
+-	{GPMC_A10, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a10.vin3a_de0 */
+-	{GPMC_A11, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_a11.vin3a_fld0 */
+-	{GPMC_A12, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_a12.gpio2_2 */
+-	{GPMC_A13, (M14 | PIN_INPUT_PULLDOWN)},	/* gpmc_a13.gpio2_3 */
+-	{GPMC_A14, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_a14.gpio2_4 */
+-	{GPMC_A15, (M14 | PIN_INPUT_PULLDOWN)},	/* gpmc_a15.gpio2_5 */
+-	{GPMC_A16, (M14 | PIN_INPUT_PULLDOWN)},	/* gpmc_a16.gpio2_6 */
+-	{GPMC_A17, (M14 | PIN_INPUT_PULLDOWN)},	/* gpmc_a17.gpio2_7 */
+-	{GPMC_A18, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_a18.gpio2_8 */
+-	{GPMC_A19, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a19.mmc2_dat4 */
+-	{GPMC_A20, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a20.mmc2_dat5 */
+-	{GPMC_A21, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a21.mmc2_dat6 */
+-	{GPMC_A22, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a22.mmc2_dat7 */
++	/* RGMII1 - Ethernet */
++	{RMII_MHZ_50_CLK, (M14 | PIN_INPUT_PULLUP)},			/* RMIIMHZ50CLK.gpio5_17 */
++	{VIN2A_D12, (M3 | PIN_OUTPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d12.rgmii1_txc */
++	{VIN2A_D13, (M3 | PIN_OUTPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d13.rgmii1_txctl */
++	{VIN2A_D14, (M3 | PIN_OUTPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d14.rgmii1_txd3 */
++	{VIN2A_D15, (M3 | PIN_OUTPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d15.rgmii1_txd2 */
++	{VIN2A_D16, (M3 | PIN_OUTPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d16.rgmii1_txd1 */
++	{VIN2A_D17, (M3 | PIN_OUTPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d17.rgmii1_txd0 */
++	{VIN2A_D18, (M3 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d18.rgmii1_rxc */
++	{VIN2A_D19, (M3 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d19.rgmii1_rxctl */
++	{VIN2A_D20, (M3 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d20.rgmii1_rxd3 */
++	{VIN2A_D21, (M3 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d21.rgmii1_rxd2 */
++	{VIN2A_D22, (M3 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d22.rgmii1_rxd1 */
++	{VIN2A_D23, (M3 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* vin2a_d23.rgmii1_rxd0 */
++
++	/* USB */
++	{USB1_DRVVBUS, (M0 | PIN_INPUT_SLEW)},	/* usb1_drvvbus.usb1_drvvbus */
++	{USB2_DRVVBUS, (M0 | PIN_INPUT_SLEW)},	/* usb2_drvvbus.usb2_drvvbus */
++
++	/* MMC1 - SD Card */
++	{MMC1_CLK, (M0 | PIN_INPUT_PULLUP)},				/* mmc1_clk.mmc1_clk */
++	{MMC1_CMD, (M0 | PIN_INPUT_PULLUP)},				/* mmc1_cmd.mmc1_cmd */
++	{MMC1_DAT0, (M0 | PIN_INPUT_PULLUP)},				/* mmc1_dat0.mmc1_dat0 */
++	{MMC1_DAT1, (M0 | PIN_INPUT_PULLUP)},				/* mmc1_dat1.mmc1_dat1 */
++	{MMC1_DAT2, (M0 | PIN_INPUT_PULLUP)},				/* mmc1_dat2.mmc1_dat2 */
++	{MMC1_DAT3, (M0 | PIN_INPUT_PULLUP)},				/* mmc1_dat3.mmc1_dat3 */
++	{MMC1_SDCD, (M0 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* mmc1_sdcd.mmc1_sdcd */
++	{MMC1_SDWP, (M0 | 0x000d0000)},						/* mmc1_sdwp.mmc1_sdwp */
++
++	/* MMC2 - eMMC */
+ 	{GPMC_A23, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a23.mmc2_clk */
+-	{GPMC_A24, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a24.mmc2_dat0 */
+-	{GPMC_A25, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a25.mmc2_dat1 */
+-	{GPMC_A26, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a26.mmc2_dat2 */
+-	{GPMC_A27, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a27.mmc2_dat3 */
+ 	{GPMC_CS1, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_cs1.mmc2_cmd */
+-	{GPMC_CS0, (M14 | PIN_INPUT_PULLDOWN)},	/* gpmc_cs0.gpio2_19 */
+-	{GPMC_CS2, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_cs2.gpio2_20 */
+-	{GPMC_CS3, (M2 | PIN_INPUT_PULLDOWN | MANUAL_MODE)},	/* gpmc_cs3.vin3a_clk0 */
+-	{GPMC_CLK, (M9 | PIN_INPUT_PULLDOWN)},	/* gpmc_clk.dma_evt1 */
+-	{GPMC_ADVN_ALE, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_advn_ale.gpio2_23 */
+-	{GPMC_OEN_REN, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_oen_ren.gpio2_24 */
+-	{GPMC_WEN, (M14 | PIN_INPUT_PULLUP)},	/* gpmc_wen.gpio2_25 */
+-	{GPMC_BEN0, (M9 | PIN_INPUT_PULLDOWN)},	/* gpmc_ben0.dma_evt3 */
+-	{GPMC_BEN1, (M9 | PIN_INPUT_PULLDOWN)},	/* gpmc_ben1.dma_evt4 */
+-	{GPMC_WAIT0, (M14 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* gpmc_wait0.gpio2_28 */
+-	{VIN1B_CLK1, (M14 | PIN_INPUT_SLEW)},	/* vin1b_clk1.gpio2_31 */
+-	{VIN1A_D2, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d2.gpio3_6 */
+-	{VIN1A_D3, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d3.gpio3_7 */
+-	{VIN1A_D4, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d4.gpio3_8 */
+-	{VIN1A_D5, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d5.gpio3_9 */
+-	{VIN1A_D6, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d6.gpio3_10 */
+-	{VIN1A_D7, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d7.gpio3_11 */
+-	{VIN1A_D8, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d8.gpio3_12 */
+-	{VIN1A_D10, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d10.gpio3_14 */
+-	{VIN1A_D11, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d11.gpio3_15 */
+-	{VIN1A_D12, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d12.gpio3_16 */
+-	{VIN1A_D14, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d14.gpio3_18 */
+-	{VIN1A_D16, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d16.gpio3_20 */
+-	{VIN1A_D19, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d19.gpio3_23 */
+-	{VIN1A_D20, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d20.gpio3_24 */
+-	{VIN1A_D22, (M14 | PIN_INPUT_PULLDOWN)},	/* vin1a_d22.gpio3_26 */
+-	{VIN2A_CLK0, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_clk0.gpio3_28 */
+-	{VIN2A_DE0, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_de0.gpio3_29 */
+-	{VIN2A_FLD0, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_fld0.gpio3_30 */
+-	{VIN2A_HSYNC0, (M11 | PIN_INPUT_PULLUP)},	/* vin2a_hsync0.pr1_uart0_cts_n */
+-	{VIN2A_VSYNC0, (M11 | PIN_OUTPUT_PULLUP)},	/* vin2a_vsync0.pr1_uart0_rts_n */
+-	{VIN2A_D0, (M11 | PIN_INPUT_PULLUP)},	/* vin2a_d0.pr1_uart0_rxd */
+-	{VIN2A_D1, (M11 | PIN_OUTPUT)},	/* vin2a_d1.pr1_uart0_txd */
+-	{VIN2A_D2, (M8 | PIN_INPUT_PULLUP)},	/* vin2a_d2.uart10_rxd */
+-	{VIN2A_D3, (M8 | PIN_OUTPUT)},	/* vin2a_d3.uart10_txd */
+-	{VIN2A_D4, (M8 | PIN_INPUT_PULLUP)},	/* vin2a_d4.uart10_ctsn */
+-	{VIN2A_D5, (M8 | PIN_OUTPUT_PULLUP)},	/* vin2a_d5.uart10_rtsn */
+-	{VIN2A_D6, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_d6.gpio4_7 */
+-	{VIN2A_D7, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_d7.gpio4_8 */
+-	{VIN2A_D8, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_d8.gpio4_9 */
+-	{VIN2A_D9, (M14 | PIN_INPUT_PULLDOWN)},	/* vin2a_d9.gpio4_10 */
+-	{VIN2A_D10, (M10 | PIN_OUTPUT_PULLDOWN)},	/* vin2a_d10.ehrpwm2B */
+-	{VIN2A_D11, (M10 | PIN_INPUT_PULLDOWN)},	/* vin2a_d11.ehrpwm2_tripzone_input */
+-	{VIN2A_D12, (M3 | PIN_OUTPUT | MANUAL_MODE)},	/* vin2a_d12.rgmii1_txc */
+-	{VIN2A_D13, (M3 | PIN_OUTPUT | MANUAL_MODE)},	/* vin2a_d13.rgmii1_txctl */
+-	{VIN2A_D14, (M3 | PIN_OUTPUT | MANUAL_MODE)},	/* vin2a_d14.rgmii1_txd3 */
+-	{VIN2A_D15, (M3 | PIN_OUTPUT | MANUAL_MODE)},	/* vin2a_d15.rgmii1_txd2 */
+-	{VIN2A_D16, (M3 | PIN_OUTPUT | MANUAL_MODE)},	/* vin2a_d16.rgmii1_txd1 */
+-	{VIN2A_D17, (M3 | PIN_OUTPUT | MANUAL_MODE)},	/* vin2a_d17.rgmii1_txd0 */
+-	{VIN2A_D18, (M3 | PIN_INPUT | MANUAL_MODE)},	/* vin2a_d18.rgmii1_rxc */
+-	{VIN2A_D19, (M3 | PIN_INPUT | MANUAL_MODE)},	/* vin2a_d19.rgmii1_rxctl */
+-	{VIN2A_D20, (M3 | PIN_INPUT | MANUAL_MODE)},	/* vin2a_d20.rgmii1_rxd3 */
+-	{VIN2A_D21, (M3 | PIN_INPUT | MANUAL_MODE)},	/* vin2a_d21.rgmii1_rxd2 */
+-	{VIN2A_D22, (M3 | PIN_INPUT | MANUAL_MODE)},	/* vin2a_d22.rgmii1_rxd1 */
+-	{VIN2A_D23, (M3 | PIN_INPUT | MANUAL_MODE)},	/* vin2a_d23.rgmii1_rxd0 */
+-	{VOUT1_FLD, (M14 | PIN_INPUT)},	/* vout1_fld.gpio4_21 */
+-	{MDIO_MCLK, (M0 | PIN_OUTPUT | SLEWCONTROL)},	/* mdio_mclk.mdio_mclk */
+-	{MDIO_D, (M0 | PIN_INPUT | SLEWCONTROL)},	/* mdio_d.mdio_d */
+-	{RMII_MHZ_50_CLK, (M14 | PIN_INPUT_PULLUP)},	/* RMII_MHZ_50_CLK.gpio5_17 */
+-	{UART3_RXD, (M14 | PIN_INPUT_SLEW)},	/* uart3_rxd.gpio5_18 */
+-	{UART3_TXD, (M14 | PIN_INPUT_SLEW)},	/* uart3_txd.gpio5_19 */
+-	{RGMII0_TXC, (M0 | PIN_OUTPUT | MANUAL_MODE)},	/* rgmii0_txc.rgmii0_txc */
+-	{RGMII0_TXCTL, (M0 | PIN_OUTPUT | MANUAL_MODE)},	/* rgmii0_txctl.rgmii0_txctl */
+-	{RGMII0_TXD3, (M0 | PIN_OUTPUT | MANUAL_MODE)},	/* rgmii0_txd3.rgmii0_txd3 */
+-	{RGMII0_TXD2, (M0 | PIN_OUTPUT | MANUAL_MODE)},	/* rgmii0_txd2.rgmii0_txd2 */
+-	{RGMII0_TXD1, (M0 | PIN_OUTPUT | MANUAL_MODE)},	/* rgmii0_txd1.rgmii0_txd1 */
+-	{RGMII0_TXD0, (M0 | PIN_OUTPUT | MANUAL_MODE)},	/* rgmii0_txd0.rgmii0_txd0 */
+-	{RGMII0_RXC, (M0 | PIN_INPUT | MANUAL_MODE)},	/* rgmii0_rxc.rgmii0_rxc */
+-	{RGMII0_RXCTL, (M0 | PIN_INPUT | MANUAL_MODE)},	/* rgmii0_rxctl.rgmii0_rxctl */
+-	{RGMII0_RXD3, (M0 | PIN_INPUT | MANUAL_MODE)},	/* rgmii0_rxd3.rgmii0_rxd3 */
+-	{RGMII0_RXD2, (M0 | PIN_INPUT | MANUAL_MODE)},	/* rgmii0_rxd2.rgmii0_rxd2 */
+-	{RGMII0_RXD1, (M0 | PIN_INPUT | MANUAL_MODE)},	/* rgmii0_rxd1.rgmii0_rxd1 */
+-	{RGMII0_RXD0, (M0 | PIN_INPUT | MANUAL_MODE)},	/* rgmii0_rxd0.rgmii0_rxd0 */
+-	{USB1_DRVVBUS, (M0 | PIN_OUTPUT | SLEWCONTROL)},	/* usb1_drvvbus.usb1_drvvbus */
+-	{USB2_DRVVBUS, (M0 | PIN_OUTPUT_PULLDOWN | SLEWCONTROL)},	/* usb2_drvvbus.usb2_drvvbus */
+-	{GPIO6_14, (M10 | PIN_INPUT_PULLUP)},	/* gpio6_14.timer1 */
+-	{GPIO6_15, (M10 | PIN_INPUT_PULLUP)},	/* gpio6_15.timer2 */
+-	{GPIO6_16, (M10 | PIN_INPUT_PULLUP)},	/* gpio6_16.timer3 */
+-	{XREF_CLK0, (M9 | PIN_OUTPUT_PULLDOWN)},	/* xref_clk0.clkout2 */
+-	{XREF_CLK1, (M14 | PIN_INPUT_PULLDOWN)},	/* xref_clk1.gpio6_18 */
+-	{XREF_CLK2, (M14 | PIN_INPUT_PULLDOWN)},	/* xref_clk2.gpio6_19 */
+-	{XREF_CLK3, (M9 | PIN_OUTPUT_PULLDOWN)},	/* xref_clk3.clkout3 */
+-	{MCASP1_ACLKX, (M10 | PIN_INPUT_PULLUP)},	/* mcasp1_aclkx.i2c3_sda */
+-	{MCASP1_FSX, (M10 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* mcasp1_fsx.i2c3_scl */
+-	{MCASP1_ACLKR, (M10 | PIN_INPUT_PULLUP)},	/* mcasp1_aclkr.i2c4_sda */
+-	{MCASP1_FSR, (M10 | PIN_INPUT_PULLUP)},	/* mcasp1_fsr.i2c4_scl */
+-	{MCASP1_AXR0, (M10 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* mcasp1_axr0.i2c5_sda */
+-	{MCASP1_AXR1, (M10 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* mcasp1_axr1.i2c5_scl */
+-	{MCASP1_AXR2, (M14 | PIN_INPUT_PULLDOWN)},	/* mcasp1_axr2.gpio5_4 */
+-	{MCASP1_AXR3, (M14 | PIN_INPUT_PULLDOWN)},	/* mcasp1_axr3.gpio5_5 */
+-	{MCASP1_AXR4, (M14 | PIN_INPUT_PULLDOWN)},	/* mcasp1_axr4.gpio5_6 */
+-	{MCASP1_AXR5, (M14 | PIN_INPUT_PULLDOWN)},	/* mcasp1_axr5.gpio5_7 */
+-	{MCASP1_AXR6, (M14 | PIN_INPUT_PULLDOWN)},	/* mcasp1_axr6.gpio5_8 */
+-	{MCASP1_AXR7, (M14 | PIN_INPUT_PULLDOWN)},	/* mcasp1_axr7.gpio5_9 */
+-	{MCASP1_AXR8, (M14 | PIN_INPUT | SLEWCONTROL)},	/* mcasp1_axr8.gpio5_10 */
+-	{MCASP1_AXR9, (M14 | PIN_INPUT | SLEWCONTROL)},	/* mcasp1_axr9.gpio5_11 */
+-	{MCASP1_AXR10, (M14 | PIN_INPUT | SLEWCONTROL)},	/* mcasp1_axr10.gpio5_12 */
+-	{MCASP1_AXR11, (M14 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* mcasp1_axr11.gpio4_17 */
+-	{MCASP1_AXR12, (M1 | PIN_INPUT_SLEW | VIRTUAL_MODE10)},	/* mcasp1_axr12.mcasp7_axr0 */
+-	{MCASP1_AXR13, (M1 | PIN_INPUT_SLEW | VIRTUAL_MODE10)},	/* mcasp1_axr13.mcasp7_axr1 */
+-	{MCASP1_AXR14, (M1 | PIN_INPUT_SLEW | VIRTUAL_MODE10)},	/* mcasp1_axr14.mcasp7_aclkx */
+-	{MCASP1_AXR15, (M1 | PIN_INPUT_SLEW | VIRTUAL_MODE10)},	/* mcasp1_axr15.mcasp7_fsx */
+-	{MCASP3_ACLKX, (M0 | PIN_INPUT_PULLDOWN)},	/* mcasp3_aclkx.mcasp3_aclkx */
+-	{MCASP3_FSX, (M0 | PIN_INPUT_SLEW)},	/* mcasp3_fsx.mcasp3_fsx */
+-	{MCASP3_AXR0, (M0 | PIN_INPUT_SLEW)},	/* mcasp3_axr0.mcasp3_axr0 */
+-	{MCASP3_AXR1, (M0 | PIN_INPUT_SLEW)},	/* mcasp3_axr1.mcasp3_axr1 */
+-	{MCASP4_ACLKX, (M3 | PIN_INPUT_PULLUP)},	/* mcasp4_aclkx.uart8_rxd */
+-	{MCASP4_FSX, (M3 | PIN_OUTPUT)},	/* mcasp4_fsx.uart8_txd */
+-	{MCASP4_AXR0, (M3 | PIN_INPUT_PULLUP)},	/* mcasp4_axr0.uart8_ctsn */
+-	{MCASP4_AXR1, (M3 | PIN_OUTPUT_PULLUP)},	/* mcasp4_axr1.uart8_rtsn */
+-	{MCASP5_ACLKX, (M3 | PIN_INPUT_PULLUP)},	/* mcasp5_aclkx.uart9_rxd */
+-	{MCASP5_FSX, (M3 | PIN_OUTPUT)},	/* mcasp5_fsx.uart9_txd */
+-	{MCASP5_AXR0, (M3 | PIN_INPUT_PULLUP)},	/* mcasp5_axr0.uart9_ctsn */
+-	{MCASP5_AXR1, (M3 | PIN_OUTPUT_PULLUP)},	/* mcasp5_axr1.uart9_rtsn */
+-	{MMC1_CLK, (M0 | PIN_INPUT_PULLUP)},	/* mmc1_clk.mmc1_clk */
+-	{MMC1_CMD, (M0 | PIN_INPUT_PULLUP)},	/* mmc1_cmd.mmc1_cmd */
+-	{MMC1_DAT0, (M0 | PIN_INPUT_PULLUP)},	/* mmc1_dat0.mmc1_dat0 */
+-	{MMC1_DAT1, (M0 | PIN_INPUT_PULLUP)},	/* mmc1_dat1.mmc1_dat1 */
+-	{MMC1_DAT2, (M0 | PIN_INPUT_PULLUP)},	/* mmc1_dat2.mmc1_dat2 */
+-	{MMC1_DAT3, (M0 | PIN_INPUT_PULLUP)},	/* mmc1_dat3.mmc1_dat3 */
+-	{MMC1_SDCD, (M14 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* mmc1_sdcd.gpio6_27 */
+-	{GPIO6_10, (M10 | PIN_OUTPUT_PULLDOWN)},	/* gpio6_10.ehrpwm2A */
+-	{GPIO6_11, (M0 | PIN_INPUT_PULLUP)},	/* gpio6_11.gpio6_11 */
+-	{MMC3_CLK, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_clk.mmc3_clk */
+-	{MMC3_CMD, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_cmd.mmc3_cmd */
+-	{MMC3_DAT0, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat0.mmc3_dat0 */
+-	{MMC3_DAT1, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat1.mmc3_dat1 */
+-	{MMC3_DAT2, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat2.mmc3_dat2 */
+-	{MMC3_DAT3, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat3.mmc3_dat3 */
+-	{MMC3_DAT4, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat4.mmc3_dat4 */
+-	{MMC3_DAT5, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat5.mmc3_dat5 */
+-	{MMC3_DAT6, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat6.mmc3_dat6 */
+-	{MMC3_DAT7, (M0 | PIN_INPUT_PULLUP | MANUAL_MODE)},	/* mmc3_dat7.mmc3_dat7 */
+-	{SPI1_SCLK, (M14 | PIN_INPUT_PULLDOWN)},	/* spi1_sclk.gpio7_7 */
+-	{SPI1_D1, (M14 | PIN_INPUT_PULLDOWN)},	/* spi1_d1.gpio7_8 */
+-	{SPI1_D0, (M14 | PIN_INPUT_PULLDOWN)},	/* spi1_d0.gpio7_9 */
+-	{SPI1_CS0, (M14 | PIN_INPUT)},	/* spi1_cs0.gpio7_10 */
+-	{SPI1_CS1, (M14 | PIN_INPUT)},	/* spi1_cs1.gpio7_11 */
+-	{SPI1_CS2, (M14 | PIN_INPUT_SLEW)},	/* spi1_cs2.gpio7_12 */
+-	{SPI1_CS3, (M6 | PIN_INPUT | SLEWCONTROL)},	/* spi1_cs3.hdmi1_cec */
+-	{SPI2_SCLK, (M14 | PIN_INPUT_PULLDOWN)},	/* spi2_sclk.gpio7_14 */
+-	{SPI2_D1, (M14 | PIN_INPUT_SLEW)},	/* spi2_d1.gpio7_15 */
+-	{SPI2_D0, (M14 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* spi2_d0.gpio7_16 */
+-	{SPI2_CS0, (M14 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* spi2_cs0.gpio7_17 */
+-	{DCAN1_TX, (M0 | PIN_OUTPUT | SLEWCONTROL)},	/* dcan1_tx.dcan1_tx */
+-	{DCAN1_RX, (M0 | PIN_INPUT | SLEWCONTROL)},	/* dcan1_rx.dcan1_rx */
+-	{UART1_RXD, (M0 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* uart1_rxd.uart1_rxd */
+-	{UART1_TXD, (M0 | PIN_OUTPUT | SLEWCONTROL)},	/* uart1_txd.uart1_txd */
+-	{UART1_CTSN, (M14 | PIN_INPUT_PULLDOWN)},	/* uart1_ctsn.gpio7_24 */
+-	{UART1_RTSN, (M14 | PIN_INPUT)},	/* uart1_rtsn.gpio7_25 */
+-	{UART2_RXD, (M14 | PIN_INPUT_PULLDOWN)},	/* uart2_rxd.gpio7_26 */
+-	{UART2_TXD, (M14 | PIN_INPUT_PULLDOWN)},	/* uart2_txd.gpio7_27 */
+-	{UART2_CTSN, (M2 | PIN_INPUT_PULLUP)},	/* uart2_ctsn.uart3_rxd */
+-	{UART2_RTSN, (M1 | PIN_OUTPUT)},	/* uart2_rtsn.uart3_txd */
+-	{I2C1_SDA, (M0 | PIN_INPUT_PULLUP)},	/* i2c1_sda.i2c1_sda */
+-	{I2C1_SCL, (M0 | PIN_INPUT_PULLUP)},	/* i2c1_scl.i2c1_scl */
+-	{I2C2_SDA, (M1 | PIN_INPUT_PULLUP)},	/* i2c2_sda.hdmi1_ddc_scl */
+-	{I2C2_SCL, (M1 | PIN_INPUT_PULLUP)},	/* i2c2_scl.hdmi1_ddc_sda */
+-	{WAKEUP0, (M0 | PIN_INPUT)},	/* Wakeup0.Wakeup0 */
+-	{WAKEUP1, (M0 | PIN_INPUT)},	/* Wakeup1.Wakeup1 */
+-	{WAKEUP2, (M0 | PIN_INPUT)},	/* Wakeup2.Wakeup2 */
+-	{WAKEUP3, (M0 | PIN_INPUT)},	/* Wakeup3.Wakeup3 */
+-	{ON_OFF, (M0 | PIN_OUTPUT)},	/* on_off.on_off */
+-	{RTC_PORZ, (M0 | PIN_INPUT)},	/* rtc_porz.rtc_porz */
+-	{TMS, (M0 | PIN_INPUT_PULLUP)},	/* tms.tms */
++	{GPMC_A24, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_a24.mmc2_dat0 */
++	{GPMC_A25, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A25.mmc2_dat1 */
++	{GPMC_A26, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A26.mmc2_dat2 */
++	{GPMC_A27, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A27.mmc2_dat3 */
++	{GPMC_A19, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A19.mmc2_dat4 */
++	{GPMC_A20, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A20.mmc2_dat5*/
++	{GPMC_A21, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A21.mmc2_dat6 */
++	{GPMC_A22, (M1 | PIN_INPUT_PULLUP)},	/* gpmc_A22.mmc2_dat7 */
++
++	/* SPI - To Expansion Port */
++	{SPI1_SCLK, (M0 | PIN_OUTPUT)},		/* spi1_sclk.spi1_sclk */
++	{SPI1_D1, (M0 | PIN_INPUT_SLEW)},	/* spi1_d1.spi1_d1 */
++	{SPI1_D0, (M0 | PIN_INPUT_SLEW)},	/* spi1_d0.spi1_d0 */
++	{SPI1_CS0, (M0 | PIN_OUTPUT)},		/* spi1_cs0.spi1_cs0 */
++	{SPI1_CS1, (M0 | PIN_OUTPUT)},		/* spi1_cs1.spi1_cs1 */
++
++	{UART1_CTSN, (M0 | PIN_INPUT_PULLUP)},	/* uart1_ctsn.uart1_ctsn */
++	{UART1_RTSN, (M0 | PIN_INPUT_PULLUP)},	/* uart1_rtsn.uart1_rtsn */
++
++	{UART2_TXD, (M14 | PIN_INPUT_PULLUP)},	/* uart2_txd.gpio7_27 - Debug LED */
++
++#if 0
++	{WAKEUP3, (M14 | PIN_INPUT_PULLUP)},	/* Wakeup3.gpio1_3 - GPIO To Expansion Port */
++	{UART2_RXD, (M14 | PIN_INPUT_PULLUP)},	/* uart2_rxd.gpio7_26 - BB Spare GPIO */
++	{SPI2_CS0, (M14 | PIN_INPUT_PULLUP)},	/* spi2_cs0.gpio7_17 - BB GPIO Exp INTn */
++#endif
++
++	/* System */
++	{ON_OFF, (M0 | PIN_OUTPUT_PULLUP)},	/* on_off.on_off */
++	{RTC_PORZ, (M0 | PIN_OUTPUT)},		/* rtc_porz.rtc_porz */
++	{TMS, (M0 | PIN_INPUT_PULLUP)},		/* tms.tms */
+ 	{TDI, (M0 | PIN_INPUT_PULLUP | SLEWCONTROL)},	/* tdi.tdi */
+-	{TDO, (M0 | PIN_OUTPUT)},	/* tdo.tdo */
+-	{TCLK, (M0 | PIN_INPUT_PULLDOWN)},	/* tclk.tclk */
+-	{TRSTN, (M0 | PIN_INPUT)},	/* trstn.trstn */
+-	{RTCK, (M0 | PIN_OUTPUT)},	/* rtck.rtck */
+-	{EMU0, (M0 | PIN_INPUT)},	/* emu0.emu0 */
+-	{EMU1, (M0 | PIN_INPUT)},	/* emu1.emu1 */
+-	{NMIN_DSP, (M0 | PIN_INPUT)},	/* nmin_dsp.nmin_dsp */
+-	{RSTOUTN, (M0 | PIN_OUTPUT)},	/* rstoutn.rstoutn */
++	{TDO, (M0 | PIN_INPUT_PULLUP)},		/* tdo.tdo */
++	{TCLK, (M0 | PIN_INPUT_PULLUP)},	/* tclk.tclk */
++	{TRSTN, (M0 | PIN_INPUT_PULLDOWN)},	/* trstn.trstn */
++	{RTCK, (M0 | PIN_INPUT)},		/* rtck.rtck */
++	{EMU0, (M0 | PIN_INPUT_PULLUP)},	/* emu0.emu0 */
++	{EMU1, (M0 | PIN_INPUT_PULLUP)},	/* emu1.emu1 */
++	{RESETN, (M0 | PIN_OUTPUT_PULLUP)},	/* resetn.resetn */
++	{RSTOUTN, (M0 | PIN_OUTPUT_PULLDOWN)},	/* rstoutn.rstoutn */
+ };
+ 
+ const struct pad_conf_entry core_padconf_array_essential_bbai[] = {
+@@ -1219,90 +1072,65 @@ const struct pad_conf_entry emmc_padconf[] = {
+ 
+ #ifdef CONFIG_IODELAY_RECALIBRATION
+ const struct iodelay_cfg_entry iodelay_cfg_array_x15_sr1_1[] = {
+-	{0x0114, 2980, 0},	/* CFG_GPMC_A0_IN */
+-	{0x0120, 2648, 0},	/* CFG_GPMC_A10_IN */
+-	{0x012C, 2918, 0},	/* CFG_GPMC_A11_IN */
+-	{0x0198, 2917, 0},	/* CFG_GPMC_A1_IN */
+-	{0x0204, 3156, 178},	/* CFG_GPMC_A2_IN */
+-	{0x0210, 3109, 246},	/* CFG_GPMC_A3_IN */
+-	{0x021C, 3142, 100},	/* CFG_GPMC_A4_IN */
+-	{0x0228, 3084, 33},	/* CFG_GPMC_A5_IN */
+-	{0x0234, 2778, 0},	/* CFG_GPMC_A6_IN */
+-	{0x0240, 3110, 0},	/* CFG_GPMC_A7_IN */
+-	{0x024C, 2874, 0},	/* CFG_GPMC_A8_IN */
+-	{0x0258, 3072, 0},	/* CFG_GPMC_A9_IN */
+-	{0x0264, 2466, 0},	/* CFG_GPMC_AD0_IN */
+-	{0x0270, 2523, 0},	/* CFG_GPMC_AD10_IN */
+-	{0x027C, 2453, 0},	/* CFG_GPMC_AD11_IN */
+-	{0x0288, 2285, 0},	/* CFG_GPMC_AD12_IN */
+-	{0x0294, 2206, 0},	/* CFG_GPMC_AD13_IN */
+-	{0x02A0, 1898, 0},	/* CFG_GPMC_AD14_IN */
+-	{0x02AC, 2473, 0},	/* CFG_GPMC_AD15_IN */
+-	{0x02B8, 2307, 0},	/* CFG_GPMC_AD1_IN */
+-	{0x02C4, 2691, 0},	/* CFG_GPMC_AD2_IN */
+-	{0x02D0, 2384, 0},	/* CFG_GPMC_AD3_IN */
+-	{0x02DC, 2462, 0},	/* CFG_GPMC_AD4_IN */
+-	{0x02E8, 2335, 0},	/* CFG_GPMC_AD5_IN */
+-	{0x02F4, 2370, 0},	/* CFG_GPMC_AD6_IN */
+-	{0x0300, 2389, 0},	/* CFG_GPMC_AD7_IN */
+-	{0x030C, 2672, 0},	/* CFG_GPMC_AD8_IN */
+-	{0x0318, 2334, 0},	/* CFG_GPMC_AD9_IN */
+-	{0x0378, 0, 0},	/* CFG_GPMC_CS3_IN */
+-	{0x0678, 406, 0},	/* CFG_MMC3_CLK_IN */
+-	{0x0680, 659, 0},	/* CFG_MMC3_CLK_OUT */
+-	{0x0684, 0, 0},	/* CFG_MMC3_CMD_IN */
+-	{0x0688, 0, 0},	/* CFG_MMC3_CMD_OEN */
+-	{0x068C, 0, 0},	/* CFG_MMC3_CMD_OUT */
+-	{0x0690, 130, 0},	/* CFG_MMC3_DAT0_IN */
+-	{0x0694, 0, 0},	/* CFG_MMC3_DAT0_OEN */
+-	{0x0698, 0, 0},	/* CFG_MMC3_DAT0_OUT */
+-	{0x069C, 169, 0},	/* CFG_MMC3_DAT1_IN */
+-	{0x06A0, 0, 0},	/* CFG_MMC3_DAT1_OEN */
+-	{0x06A4, 0, 0},	/* CFG_MMC3_DAT1_OUT */
+-	{0x06A8, 0, 0},	/* CFG_MMC3_DAT2_IN */
+-	{0x06AC, 0, 0},	/* CFG_MMC3_DAT2_OEN */
+-	{0x06B0, 0, 0},	/* CFG_MMC3_DAT2_OUT */
+-	{0x06B4, 457, 0},	/* CFG_MMC3_DAT3_IN */
+-	{0x06B8, 0, 0},	/* CFG_MMC3_DAT3_OEN */
+-	{0x06BC, 0, 0},	/* CFG_MMC3_DAT3_OUT */
+-	{0x06C0, 702, 0},	/* CFG_MMC3_DAT4_IN */
+-	{0x06C4, 0, 0},	/* CFG_MMC3_DAT4_OEN */
+-	{0x06C8, 0, 0},	/* CFG_MMC3_DAT4_OUT */
+-	{0x06CC, 738, 0},	/* CFG_MMC3_DAT5_IN */
+-	{0x06D0, 0, 0},	/* CFG_MMC3_DAT5_OEN */
+-	{0x06D4, 0, 0},	/* CFG_MMC3_DAT5_OUT */
+-	{0x06D8, 856, 0},	/* CFG_MMC3_DAT6_IN */
+-	{0x06DC, 0, 0},	/* CFG_MMC3_DAT6_OEN */
+-	{0x06E0, 0, 0},	/* CFG_MMC3_DAT6_OUT */
+-	{0x06E4, 610, 0},	/* CFG_MMC3_DAT7_IN */
+-	{0x06E8, 0, 0},	/* CFG_MMC3_DAT7_OEN */
+-	{0x06EC, 0, 0},	/* CFG_MMC3_DAT7_OUT */
+-	{0x06F0, 480, 0},	/* CFG_RGMII0_RXC_IN */
+-	{0x06FC, 111, 1641},	/* CFG_RGMII0_RXCTL_IN */
+-	{0x0708, 272, 1116},	/* CFG_RGMII0_RXD0_IN */
+-	{0x0714, 243, 1260},	/* CFG_RGMII0_RXD1_IN */
+-	{0x0720, 0, 1614},	/* CFG_RGMII0_RXD2_IN */
+-	{0x072C, 105, 1673},	/* CFG_RGMII0_RXD3_IN */
+-	{0x0740, 531, 120},	/* CFG_RGMII0_TXC_OUT */
+-	{0x074C, 201, 60},	/* CFG_RGMII0_TXCTL_OUT */
+-	{0x0758, 229, 120},	/* CFG_RGMII0_TXD0_OUT */
+-	{0x0764, 141, 0},	/* CFG_RGMII0_TXD1_OUT */
+-	{0x0770, 495, 120},	/* CFG_RGMII0_TXD2_OUT */
+-	{0x077C, 660, 120},	/* CFG_RGMII0_TXD3_OUT */
+-	{0x0A70, 1551, 115},	/* CFG_VIN2A_D12_OUT */
+-	{0x0A7C, 816, 0},	/* CFG_VIN2A_D13_OUT */
+-	{0x0A88, 876, 0},	/* CFG_VIN2A_D14_OUT */
+-	{0x0A94, 312, 0},	/* CFG_VIN2A_D15_OUT */
+-	{0x0AA0, 58, 0},	/* CFG_VIN2A_D16_OUT */
+-	{0x0AAC, 0, 0},	/* CFG_VIN2A_D17_OUT */
+-	{0x0AB0, 702, 0},	/* CFG_VIN2A_D18_IN */
+-	{0x0ABC, 136, 976},	/* CFG_VIN2A_D19_IN */
+-	{0x0AD4, 210, 1357},	/* CFG_VIN2A_D20_IN */
+-	{0x0AE0, 189, 1462},	/* CFG_VIN2A_D21_IN */
+-	{0x0AEC, 232, 1278},	/* CFG_VIN2A_D22_IN */
+-	{0x0AF8, 0, 1397},	/* CFG_VIN2A_D23_IN */
++	/* Manual functions mapping for GMAC_RGMII1 TDA2x ABC SR2.0 */
++	{0x0A70, 65, 70},		/* CFG_VIN2A_D12_OUT */
++	{0x0A7C, 125, 70},		/* CFG_VIN2A_D13_OUT */
++	{0x0A88, 0, 70},		/* CFG_VIN2A_D14_OUT */
++	{0x0A94, 0, 70},		/* CFG_VIN2A_D15_OUT */
++	{0x0AA0, 65, 70},		/* CFG_VIN2A_D16_OUT */
++	{0x0AAC, 0, 0},			/* CFG_VIN2A_D17_OUT */
++	{0x0AB0, 612, 0},		/* CFG_VIN2A_D18_IN */
++	{0x0ABC, 4, 927},		/* CFG_VIN2A_D19_IN */
++	{0x0AD4, 136, 1340},	/* CFG_VIN2A_D20_IN */
++	{0x0AE0, 130, 1450},	/* CFG_VIN2A_D21_IN */
++	{0x0AEC, 144, 1269},	/* CFG_VIN2A_D22_IN */
++	{0x0AF8, 0, 1330},		/* CFG_VIN2A_D23_IN */
++	/* Manual functions mapping for VIP3 TDA2x ABC SR2.0 */
++	/* VIN5A */
++	{0x00D8, 774, 2462},	/* CFG_GPIO6_10_IN */
++	{0x00E4, 2453, 3000},	/* CFG_GPIO6_11_IN */
++	{0x0540, 861, 582},		/* CFG_MCASP3_AXR1_IN */
++	{0x0588, 1633, 3030},	/* CFG_MCASP5_ACLKX_IN */
++	{0x0594, 2392, 3028},	/* CFG_MCASP5_AXR0_IN */
++	{0x05A0, 2435, 3026},	/* CFG_MCASP5_AXR1_IN */
++	{0x05AC, 2285, 2660},	/* CFG_MCASP5_FSX_IN */
++	{0x0678, 2501, 2822},	/* CFG_MMC3_CLK_IN */
++	{0x0684, 2423, 2826},	/* CFG_MMC3_CMD_IN */
++	{0x0690, 2336, 2820},	/* CFG_MMC3_DAT0_IN */
++	{0x069C, 2332, 2710},	/* CFG_MMC3_DAT1_IN */
++	{0x06A8, 1732, 3048},	/* CFG_MMC3_DAT2_IN */
++	{0x06B4, 2459, 2969},	/* CFG_MMC3_DAT3_IN */
++	{0x06C0, 2436, 2662},	/* CFG_MMC3_DAT4_IN */
++	{0x06CC, 2450, 2431},	/* CFG_MMC3_DAT5_IN */
++	{0x06D8, 2332, 2640},	/* CFG_MMC3_DAT6_IN */
++	{0x06E4, 1799, 2927},	/* CFG_MMC3_DAT7_IN */
++	/* VIN6A */
++	{0x03C0, 2055, 612},	/* CFG_MCASP1_AXR0_IN */
++	{0x0414, 1623, 338},	/* CFG_MCASP1_AXR1_IN */
++	{0x03E4, 1189, 619},	/* CFG_MCASP1_AXR12_IN */
++	{0x03F4, 1546, 265},	/* CFG_MCASP1_AXR13_IN */
++	{0x03FC, 1305, 0},		/* CFG_MCASP1_AXR14_IN */
++	{0x0408, 1342, 313},	/* CFG_MCASP1_AXR15_IN */
++	{0x04A4, 1063, 0},		/* CFG_MCASP2_ACLKX_IN */
++	{0x04C8, 1134, 0},		/* CFG_MCASP2_AXR2_IN */
++	{0x04D4, 1348, 487},	/* CFG_MCASP2_AXR3_IN */
++	{0x051C, 1030, 250},	/* CFG_MCASP2_FSX_IN */
++	{0x0528, 0, 0},			/* CFG_MCASP3_ACLKX_IN */
++	{0x0534, 888, 485},		/* CFG_MCASP3_AXR0_IN */
++	{0x054C, 1093, 451},	/* CFG_MCASP3_FSX_IN */
++	{0x0CF0, 681, 0},		/* CFG_XREF_CLK0_IN */
++	{0x0CFC, 21, 0},		/* CFG_XREF_CLK1_IN */
+ };
+ 
++const struct pad_conf_entry mdio_padconf_d3_tda2xde_fpd8ch[] = {
++	{MDIO_MCLK, (M5 | PIN_OUTPUT)},			/* mdio_mclk.vin4b_clk1 */
++	{MDIO_D, (M5 | PIN_INPUT)},				/* mdio_d.vin4b_d0 */
++	{VIN2A_D10, (M3 | PIN_INPUT_PULLUP)},	/* vin2a_d10.mdio_mclk */
++	{VIN2A_D11, (M3 | PIN_INPUT_PULLUP)},	/* vin2a_d11.mdio_d */
++	{GPMC_A10, (M14 | PIN_INPUT)}, 			/* gpmc_a10.gpio2_0 */
++};
++
++
+ const struct iodelay_cfg_entry iodelay_cfg_array_x15_sr2_0[] = {
+ 	{0x0114, 2519, 702},	/* CFG_GPMC_A0_IN */
+ 	{0x0120, 2435, 411},	/* CFG_GPMC_A10_IN */
+diff --git a/configs/am57xx_evm_defconfig b/configs/am57xx_evm_defconfig
+index 0cb9b8d..2435dd6 100644
+--- a/configs/am57xx_evm_defconfig
++++ b/configs/am57xx_evm_defconfig
+@@ -61,7 +61,8 @@ CONFIG_FASTBOOT_FLASH=y
+ CONFIG_FASTBOOT_FLASH_MMC_DEV=1
+ CONFIG_FASTBOOT_CMD_OEM_FORMAT=y
+ CONFIG_DM_GPIO=y
+-CONFIG_DM_I2C=y
++CONFIG_SYS_I2C=y
++CONFIG_CMD_I2C=y
+ CONFIG_MISC=y
+ CONFIG_FS_LOADER=y
+ CONFIG_DM_MMC=y
+@@ -78,7 +79,7 @@ CONFIG_PHY=y
+ CONFIG_PIPE3_PHY=y
+ CONFIG_OMAP_USB2_PHY=y
+ CONFIG_DM_PMIC=y
+-CONFIG_PMIC_PALMAS=y
++#CONFIG_PMIC_PALMAS=y
+ CONFIG_DM_REGULATOR=y
+ CONFIG_DM_REGULATOR_PALMAS=y
+ CONFIG_REMOTEPROC_TI_IPU=y
+@@ -103,4 +104,4 @@ CONFIG_USB_GADGET_MANUFACTURER="Texas Instruments"
+ CONFIG_USB_GADGET_VENDOR_NUM=0x0451
+ CONFIG_USB_GADGET_PRODUCT_NUM=0xd022
+ CONFIG_CLK=y
+-CONFIG_CLK_CDCE9XX=y
++
+-- 
+2.7.4
+
