@@ -1,7 +1,7 @@
 # TI / AWS Deep Learning Demo
 ![](docs/media/d3_logo.png "D3 Logo")
 
-Defect Detection using the AM57x Sitara Processor
+### Defect Detection using the AM57x Sitara Processor
 
 ## Introduction
 This document describes a defect detection demo developed by D3 Engineering for Texas Instruments and Amazon. The demo shows the ability of the Texas Instruments Sitara platform, specifically the AM5729, to run AI applications at the edge. The AM5729 architecture has multiple processors that can be leveraged for a variety of compute intensive tasks, in this case running a MobileNetV2 neural network trained to detect defects in parts.
@@ -9,7 +9,7 @@ The parts chosen are camera modules and the defects the model is trained to dete
 
 ## Demo Components
 ### Hardware Components
-he physical setup consists of a stepper motor turntable upon which the parts are placed, a USB motor controller, a USB webcam, and an HDMI display. These elements along with a host system are connected to the target system, a [TI AM5729 Industrial Development Kit](https://www.ti.com/lit/ml/sprw282b/sprw282b.pdf?ts=1593004419768&ref_url=https%253A%252F%252Fwww.ti.com%252Ftool%252FTMDSIDK572) (IDK) where the demo runs. A bootable SD card contains the Linux operating system and filesystem for the target. This is shown below.
+The physical setup consists of a stepper motor turntable upon which the parts are placed, a USB motor controller, a USB webcam, and an HDMI display. These elements along with a host system are connected tothe target system, a [TI AM5729 Industrial Development Kit](https://www.ti.com/lit/ml/sprw282b/sprw282b.pdf?ts=1593004419768&ref_url=https%253A%252F%252Fwww.ti.com%252Ftool%252FTMDSIDK572) (IDK) where the demo runs. A bootable SD card contains the Linux operating system and filesystem for the target. This is shown below.
 ![Figure 1: Demo Hardware Components](docs/media/hw_comp_diagram.png)
 
 ### Software Components
@@ -172,7 +172,7 @@ There are several configuration options for the demo. Currently they all reside 
 ## Modifying the Demo
 
 Aside from the configuration changes in the previous section, the only other change that can be made to the demo is to alter the MobileNetV2 model to recognize defects in a different set of objects. The basic process involves acquiring a new set of training images and using them to retrain and recompile the model. To speed up the process, transfer learning1 can be used whereby the existing demo model is used as a starting point.
-The details of training convolutional neural networks are beyond the scope of this document. But at a high-level there are two basic options for retraining the MobileNetV2 model used in the demo: train and compile locally on the host system or train and compile in the cloud using AWS SageMaker Neo. For deploying the model to the target from SageMaker, an option is to use [AWS Greengrass](https://aws.amazon.com/greengrass/ml/) These options are depicted below.
+The details of training convolutional neural networks are beyond the scope of this document. But at a high-level there are two basic options for retraining the MobileNetV2 model used in the demo: train and compile locally on the host system or train and compile in the cloud using AWS SageMaker Neo. For deploying the model to the target from SageMaker, an option is to use [AWS IoT Greengrass](https://aws.amazon.com/greengrass/ml/) These options are depicted below.
 
 ![Figure 6: Flowchart for Retraining the Demo Model](docs/media/retrain_flow.png)
 
@@ -205,7 +205,7 @@ This folder will at least contain the following files after training
 * history.pkl - the history object returned by keras’ model.fit() function, exported by pickel.
 Depending on your config.py settings, this directory may also contain various epoch-val_acc.ckpt files, saved by the [ModelCheckpoint](https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/ModelCheckpoint) callback.Training in the Cloud.
 
-## Demo using Amazon Sagemaker Neo and AWS Greengrass
+## Demo using Amazon Sagemaker Neo and AWS IoT Greengrass
 
 ### Introduction
 This section covers the approach for inference at the Edge based on AWS IoT Greengrass ML and Amazon SageMaker Neo to train and deploy the ML model.
@@ -214,9 +214,9 @@ This section covers the approach for inference at the Edge based on AWS IoT Gree
 
 [Amazon SageMaker Neo](https://aws.amazon.com/sagemaker/neo/) optimizes models to run up to twice as fast, with less than a tenth of the memory footprint, with no loss in accuracy.
 
-[AWS IoT Greengrass](https://docs.aws.amazon.com/greengrass/latest/developerguide/what-is-gg.html) is software that extends AWS Cloud capabilities to local devices, making it possible for those devices to collect and analyze data closer to the source of information, while also securely communicating with each other on local networks. AWS Greengrass allows you to author serverless code (AWS Lambda functions) in the cloud and conveniently deploy it to devices for local execution of applications
+[AWS IoT Greengrass](https://docs.aws.amazon.com/greengrass/latest/developerguide/what-is-gg.html) is software that extends AWS Cloud capabilities to local devices, making it possible for those devices to collect and analyze data closer to the source of information, while also securely communicating with each other on local networks. AWS IoT Greengrass allows you to author serverless code (AWS Lambda functions) in the cloud and conveniently deploy it to devices for local execution of applications
 
-In this approach, the training images, along with their classification labels, are uploaded to a pre-defined S3 bucket.  The model for image classification will be trained with Amazon SageMaker Neo and then downloaded to AWS Greengrass to perform image classification on the AM572x board.
+In this approach, the training images, along with their classification labels, are uploaded to a pre-defined S3 bucket.  The model for image classification will be trained with Amazon SageMaker Neo and then downloaded to AWS IoT Greengrass to perform image classification on the AM572x board.
 
 Refer to https://docs.aws.amazon.com/greengrass/latest/developerguide/ml-inference.html for more information.
 
@@ -281,7 +281,7 @@ To create a Jupyter notebook
 * In the Jupyter notebook, choose File and Save as, and name the notebook.
 
 ### Train a model with Amazon SageMaker
-You can use this Jupyter notebook on Amazon SageMaker to train a model for image classification. The trained model will be used later by IoT Greengrass to invoke local machine learning inference.
+You can use this Jupyter notebook on Amazon SageMaker to train a model for image classification. The trained model will be used later by AWS IoT Greengrass to invoke local machine learning inference.
 To access the notebook and train the model execute the following steps.
 * In the Jupyter notebook. Click on Upload.
 * Select the file sagemaker/defect-demo.ipynb that was previously downloaded from the git repo
@@ -302,7 +302,7 @@ Once the model is trained, it is compiled using the Neo framework and built for 
 
 Once built, Neo saves the training artifacts in an S3 bucket created for the purpose. The bucket will be named as per the configuration settings in the Jupyter notebook.  The compiled model artifacts are stored in a tarball, named depending on the target hardware specified in the Jupyter notebook. For this demo the file is named model-sitara_am57x.tar.gz.
 
-### Create ML-Inference Lambda for Greengrass
+### Create ML-Inference Lambda for AWS IoT Greengrass
 The next step is to create a Lambda function to be deployed to the Greengrass Core on the AM572x IDK. The function will load the machine learning model you have trained earlier with SageMaker/Neo. 
 * Go to the AWS Lambda console.
 * Create a new Lambda and use the Author from scratch option.
@@ -325,7 +325,7 @@ Create a version and an alias:
 * Enter dev as Name and select 1 in the Version dropdown.
 * Finally, click on Create.
 
-### Assign the ML-Inference Lambda to your Greengrass Group
+### Assign the ML-Inference Lambda to your AWS IoT Greengrass Group
 
 For Greengrass to use a Lambda function you need to assign the Lambda function to your Greengrass Group.
 The Lambda function on Greengrass will be configured as a long running function because it should scan a volume or shared memory for images regularly.
@@ -341,7 +341,7 @@ The Lambda function on Greengrass will be configured as a long running function 
 * Select Make this function long-lived and keep it running indefinitely.
 * Click on Update at the bottom of the page.
 
-### Assign Resources to your Greengrass Group
+### Assign Resources to your AWS IoT Greengrass Group
 The Lambda function will be assigned two resources:
 * A volume resource on the AM572x IDK: 
   * Option 1: A directory that is scanned for images.  For the demo example, the folder target/video has .png files that can be used as simulated input.  It must be assigned as a local resource.
@@ -386,12 +386,12 @@ The Lambda function which does the image classification creates messages when an
 
 We have now created devices and subscriptions in the Greengrass Group and are ready for the first deployment in order to make these modifications effective in the Greengrass core.
 
-### Deploy the Greengrass Group
+### Deploy the AWS IoT Greengrass Group
 The configuration for the Greengrass Group has been created in the AWS cloud. To make the Greengrass Core gets the configuration as well as the Lambda function and the model a deployment must be initiated.
 * Go to the AWS IoT Greengrass console.
 * Select DefectClassifier group.
 * Click on Actions and select Deploy
-Watch the output from the log files and watch also the deployment results in the AWS Greengrass console.
+Watch the output from the log files and watch also the deployment results in the AWS IoT Greengrass console.
 
 ### Classify Images at the Edge
 To initiate the classification process, use the desktop app that controls the demo to initiate an image capture.  Run the command:
